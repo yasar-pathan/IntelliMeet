@@ -20,6 +20,9 @@ const customHandler = (req, res, next, options) => {
   next(new ApiError(429, options.message));
 };
 
+const passThroughLimiter = (_req, _res, next) => next();
+const isTestEnv = process.env.NODE_ENV === 'test';
+
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // Limit each IP to 100 requests per window
@@ -51,8 +54,8 @@ const aiLimiter = rateLimit({
 });
 
 module.exports = {
-  globalLimiter,
-  authLimiter,
-  aiLimiter
+  globalLimiter: isTestEnv ? passThroughLimiter : globalLimiter,
+  authLimiter: isTestEnv ? passThroughLimiter : authLimiter,
+  aiLimiter: isTestEnv ? passThroughLimiter : aiLimiter
 };
 

@@ -18,9 +18,20 @@ const initSocketManager = (io) => {
         return next(new Error('Authentication error: Token is required'));
       }
 
+      // Keep socket auth in sync with HTTP auth behavior.
+      const isBlacklisted = await redis.get(`blacklist:${token}`);
+      if (isBlacklisted) {
+        return next(new Error('Authentication error: Token has been revoked'));
+      }
+
       // Verify token
       const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
-      socket.user = decoded;
+      const user = await User.findById(decoded._id).select('_id isActive');
+      if (!user || user.isActive === false) {
+        return next(new Error('Authentication error: Account is inactive'));
+      }
+
+      socket.user = { ...decoded, _id: user._id.toString() };
       next();
     } catch (err) {
       logger.error(`Socket connection auth failed: ${err.message}`);

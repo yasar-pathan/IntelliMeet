@@ -27,13 +27,14 @@ const createMeetingSchema = Joi.object({
   tags: Joi.array().items(Joi.string().trim()).optional(),
   agenda: Joi.array().items(Joi.string().trim()).optional(),
   isPasswordProtected: Joi.boolean().default(false),
-  password: Joi.string().when('isPasswordProtected', {
+  password: Joi.string().allow('').when('isPasswordProtected', {
     is: true,
-    then: Joi.required().messages({
-      'any.required': 'password is required when the meeting is password protected'
+    then: Joi.string().required().invalid('').messages({
+      'any.required': 'Password is required when password protection is enabled',
+      'any.invalid': 'Password cannot be empty when password protection is enabled'
     }),
     otherwise: Joi.forbidden().messages({
-      'any.unknown': 'password is not allowed if meeting is not password protected'
+      'any.unknown': 'Password field should not be provided unless password protection is enabled'
     })
   })
 });

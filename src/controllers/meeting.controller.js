@@ -152,9 +152,14 @@ const getMeetings = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, JSON.parse(cachedResults), 'Meetings list retrieved (cached)'));
   }
 
+  const sort =
+    req.query.status === 'ended'
+      ? { endedAt: -1, updatedAt: -1 }
+      : { scheduledAt: -1, createdAt: -1 };
+
   const query = Meeting.find(filter)
     .populate('host', 'name avatar')
-    .sort({ scheduledAt: -1 })
+    .sort(sort)
     .skip(skip)
     .limit(limit);
 
@@ -271,8 +276,8 @@ const joinMeeting = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'This meeting is no longer active');
   }
 
-  // Verify password if protected
-  if (meeting.isPasswordProtected) {
+  // Verify password if protected (skip if host)
+  if (meeting.isPasswordProtected && meeting.host.toString() !== userId.toString()) {
     const isMatched = await meetingService.verifyMeetingPassword(password, meeting.password);
     if (!isMatched) {
       throw new ApiError(401, 'Invalid password to join this meeting');

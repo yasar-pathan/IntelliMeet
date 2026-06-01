@@ -67,7 +67,7 @@ const register = asyncHandler(async (req, res) => {
  * @returns { ApiResponse } 200 OK status with access token and user info
  */
 const verifyEmail = asyncHandler(async (req, res) => {
-  const { token } = req.query;
+  const token = req.query.token || req.body.token;
 
   if (!token) {
     throw new ApiError(400, 'Verification token is required');
@@ -143,7 +143,7 @@ const login = asyncHandler(async (req, res) => {
   delete userResponse.refreshTokens;
 
   res.status(200).json(
-    new ApiResponse(200, { accessToken, user: userResponse }, 'Login successful')
+    new ApiResponse(200, { accessToken, refreshToken, user: userResponse }, 'Login successful')
   );
 });
 
@@ -163,7 +163,7 @@ const logout = asyncHandler(async (req, res) => {
   }
 
   // Get user from request context (set by verifyJWT middleware)
-  const user = await User.findById(req.user._id);
+  const user = await User.findById(req.user._id).select('+refreshTokens');
 
   if (user) {
     await authService.logout(user, accessToken, refreshToken);
@@ -186,7 +186,7 @@ const logout = asyncHandler(async (req, res) => {
  * @returns { ApiResponse } 200 OK status with new access token
  */
 const refreshToken = asyncHandler(async (req, res) => {
-  const oldRefreshToken = req.cookies?.refreshToken;
+  const oldRefreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
 
   if (!oldRefreshToken) {
     throw new ApiError(401, 'Refresh token is required');
@@ -197,8 +197,12 @@ const refreshToken = asyncHandler(async (req, res) => {
   // Set new cookie
   setRefreshTokenCookie(res, newRefreshToken);
 
+  const userResponse = user.toObject();
+  delete userResponse.password;
+  delete userResponse.refreshTokens;
+
   res.status(200).json(
-    new ApiResponse(200, { accessToken }, 'Tokens rotated successfully')
+    new ApiResponse(200, { accessToken, refreshToken: newRefreshToken, user: userResponse }, 'Tokens rotated successfully')
   );
 });
 
@@ -243,7 +247,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
  * @returns { ApiResponse } 200 OK success message
  */
 const resetPassword = asyncHandler(async (req, res) => {
-  const { token } = req.query;
+  const token = req.query.token || req.body.token;
   const { newPassword } = req.body;
 
   if (!token) {
@@ -265,10 +269,10 @@ const resetPassword = asyncHandler(async (req, res) => {
   user.password = newPassword;
   user.passwordResetToken = undefined;
   user.passwordResetExpiry = undefined;
-  
+
   // Invalidate all existing sessions/refresh tokens for security
   user.refreshTokens = [];
-  
+
   await user.save();
 
   // Delete session cache from Redis

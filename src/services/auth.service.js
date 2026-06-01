@@ -83,6 +83,8 @@ const rotateTokens = async (oldRefreshToken) => {
  * @param {string} refreshToken 
  */
 const logout = async (user, accessToken, refreshToken) => {
+  user.refreshTokens = user.refreshTokens || [];
+
   // Remove refresh token
   if (refreshToken) {
     user.refreshTokens = user.refreshTokens.filter(token => token !== refreshToken);

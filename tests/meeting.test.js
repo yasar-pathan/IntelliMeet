@@ -1,9 +1,9 @@
 const request = require('supertest');
 const mongoose = require('mongoose');
 const app = require('../src/app');
-const User = require('../models/User');
-const Meeting = require('../models/Meeting');
-const redis = require('../config/redis');
+const User = require('../src/models/User');
+const Meeting = require('../src/models/Meeting');
+const redis = require('../src/config/redis');
 
 // Load environment variables for testing
 require('dotenv').config();
