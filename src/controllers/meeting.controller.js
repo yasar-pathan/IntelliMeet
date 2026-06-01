@@ -1,10 +1,13 @@
 const Meeting = require('../models/Meeting');
 const Team = require('../models/Team');
-const Task = require('../models/Task');
-const User = require('../models/User');
 const redis = require('../config/redis');
 const meetingService = require('../services/meeting.service');
-const geminiService = require('../services/gemini.service');
+const aiProcessingService = require('../services/aiProcessing.service');
+const s3Service = require('../services/s3.service');
+const recordingStorage = require('../services/recordingStorage.service');
+const recordingUpload = require('../middleware/recordingUpload.middleware');
+const path = require('path');
+const fs = require('fs').promises;
 const notificationService = require('../services/notification.service');
 const generateMeetingCode = require('../utils/meetingCode');
 const ApiError = require('../utils/ApiError');
@@ -14,6 +17,28 @@ const logger = require('../utils/logger');
 const { getIO } = require('../config/socket');
 
 // Helper to invalidate meeting-related Redis caches
+const deleteMeetingRecordingAssets = async (meeting) => {
+  const s3Key = meeting.recording?.s3Key;
+  if (!s3Key) return;
+
+  if (await recordingStorage.localFileExists(s3Key)) {
+    try {
+      await fs.unlink(recordingStorage.resolveLocalFilePath(s3Key));
+      logger.info(`Deleted local recording: ${s3Key}`);
+    } catch (err) {
+      logger.warn(`Local recording delete failed: ${err.message}`);
+    }
+  }
+
+  if (recordingStorage.isS3Configured()) {
+    try {
+      await s3Service.deleteFile(s3Key);
+    } catch (err) {
+      logger.warn(`S3 recording delete failed: ${err.message}`);
+    }
+  }
+};
+
 const invalidateMeetingCaches = async (userId, meetingId) => {
   try {
     // Clear paginated lists caches (keys pattern)
@@ -27,6 +52,44 @@ const invalidateMeetingCaches = async (userId, meetingId) => {
     }
   } catch (err) {
     logger.error(`Error invalidating meeting cache: ${err.message}`);
+  }
+};
+
+const isTeamMember = async (teamId, userId) => {
+  if (!teamId) return false;
+  const teamDoc = await Team.findById(teamId).select('members');
+  if (!teamDoc) return false;
+  return teamDoc.members.some((member) => member.user.toString() === userId.toString());
+};
+
+const assertMeetingParticipantAccess = (meeting, userId) => {
+  const isParticipant = meeting.participants.some(
+    (participant) => participant.user.toString() === userId.toString()
+  );
+  const isHost = meeting.host.toString() === userId.toString();
+  if (!isHost && !isParticipant) {
+    throw new ApiError(403, 'Forbidden: Only meeting participants can access this recording');
+  }
+};
+
+const notifyRecordingReady = async (meeting, userId, s3Url) => {
+  const participantsList = meeting.participants.map((participant) => participant.user);
+  for (const participantId of participantsList) {
+    await notificationService.createAndSend({
+      recipient: participantId,
+      sender: userId,
+      type: 'recording_ready',
+      title: 'Meeting Recording Ready',
+      message: `The recording for "${meeting.title}" is now available to download.`,
+      data: { meetingId: meeting._id, s3Url },
+    });
+  }
+
+  try {
+    const io = getIO();
+    io.to(`meeting:${meeting.meetingCode}`).emit('meeting:recording-stopped', { s3Url });
+  } catch (sockErr) {
+    logger.debug(`Recording socket emit skipped: ${sockErr.message}`);
   }
 };
 
@@ -234,12 +297,20 @@ const getMeetingById = asyncHandler(async (req, res) => {
  */
 const getMeetingByCode = asyncHandler(async (req, res) => {
   const { meetingCode } = req.params;
+  const userId = req.user._id;
 
-  const meeting = await Meeting.findOne({ meetingCode }, 'title host participants status isPasswordProtected settings')
+  const meeting = await Meeting.findOne({ meetingCode }, 'title host participants status isPasswordProtected settings team')
     .populate('host', 'name avatar');
 
   if (!meeting) {
     throw new ApiError(404, 'Meeting not found with this code');
+  }
+
+  const isHost = meeting.host?._id?.toString() === userId.toString();
+  const isParticipant = meeting.participants.some((participant) => participant.user.toString() === userId.toString());
+  const memberOfTeam = await isTeamMember(meeting.team, userId);
+  if (!isHost && !isParticipant && !memberOfTeam) {
+    throw new ApiError(403, 'Forbidden: You do not have access to this meeting code');
   }
 
   const basicInfo = {
@@ -276,8 +347,16 @@ const joinMeeting = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'This meeting is no longer active');
   }
 
+  const hostId = meeting.host.toString();
+  if (meeting.team) {
+    const memberOfTeam = await isTeamMember(meeting.team, userId);
+    if (!memberOfTeam && hostId !== userId.toString()) {
+      throw new ApiError(403, 'Forbidden: Only team members can join this meeting');
+    }
+  }
+
   // Verify password if protected (skip if host)
-  if (meeting.isPasswordProtected && meeting.host.toString() !== userId.toString()) {
+  if (meeting.isPasswordProtected && hostId !== userId.toString()) {
     const isMatched = await meetingService.verifyMeetingPassword(password, meeting.password);
     if (!isMatched) {
       throw new ApiError(401, 'Invalid password to join this meeting');
@@ -306,7 +385,7 @@ const joinMeeting = asyncHandler(async (req, res) => {
     meeting.participants.push({
       user: userId,
       joinedAt: new Date(),
-      role: meeting.host.toString() === userId.toString() ? 'host' : 'participant'
+      role: hostId === userId.toString() ? 'host' : 'participant'
     });
   }
 
@@ -319,7 +398,7 @@ const joinMeeting = asyncHandler(async (req, res) => {
   // Emit socket update
   try {
     const io = getIO();
-    io.to(`meeting:${meeting.meetingCode}`).emit('meeting:participant-joined', { userId, role: meeting.host.toString() === userId.toString() ? 'host' : 'participant' });
+    io.to(`meeting:${meeting.meetingCode}`).emit('meeting:participant-joined', { userId, role: hostId === userId.toString() ? 'host' : 'participant' });
   } catch (sockErr) {
     logger.debug(`Socket joined broadcast skipped: ${sockErr.message}`);
   }
@@ -395,102 +474,9 @@ const leaveMeeting = asyncHandler(async (req, res) => {
   if (meeting.status === 'ended') {
     // 1. Synchronously trigger Redis to Mongo transcript flush
     await meetingService.flushTranscriptToMongo(meetingId);
-    
-    // 2. Trigger asynchronous AI generation (Summaries and tasks) - Do NOT await!
-    (async () => {
-      try {
-        const meetingWithTranscript = await Meeting.findById(meetingId);
-        if (!meetingWithTranscript.transcript || meetingWithTranscript.transcript.trim() === '') {
-          logger.info(`Skipped async AI generation for meeting ${meetingId} because transcript is empty.`);
-          return;
-        }
 
-        logger.info(`Starting async AI summary extraction for meeting: ${meetingId}`);
-
-        // Fetch participant names
-        const participantUsers = await User.find({ _id: { $in: meetingWithTranscript.participants.map(p => p.user) } }, 'name');
-        const participantNames = participantUsers.map(u => u.name);
-
-        // a. Generate Summary
-        const summaryResult = await geminiService.generateMeetingSummary(
-          meetingWithTranscript.transcript,
-          meetingWithTranscript.title,
-          meetingWithTranscript.duration
-        );
-
-        meetingWithTranscript.aiSummary = {
-          ...summaryResult,
-          generatedAt: new Date()
-        };
-
-        // b. Extract and bulk-create Action Item Tasks
-        const actionItems = await geminiService.extractActionItems(meetingWithTranscript.transcript, participantNames);
-        if (actionItems && actionItems.length > 0) {
-          const taskPromises = actionItems.map(async (item) => {
-            // Find assignee ID matching names
-            let assigneeId = null;
-            const matchedUser = participantUsers.find(u => u.name.toLowerCase() === item.assignee.toLowerCase());
-            if (matchedUser) {
-              assigneeId = matchedUser._id;
-            }
-
-            const createdTask = await Task.create({
-              title: item.title,
-              description: item.description,
-              meeting: meetingId,
-              team: meetingWithTranscript.team,
-              assignee: assigneeId,
-              assignedBy: meetingWithTranscript.host,
-              priority: item.priority || 'medium',
-              dueDate: item.dueDate ? new Date(item.dueDate) : null,
-              isAiGenerated: true
-            });
-
-            // Send notification to assignee
-            if (assigneeId) {
-              await notificationService.createAndSend({
-                recipient: assigneeId,
-                sender: meetingWithTranscript.host,
-                type: 'task_assigned',
-                title: 'New AI Task Assigned',
-                message: `You have been assigned the task: "${item.title}" from the meeting "${meetingWithTranscript.title}".`,
-                data: { taskId: createdTask._id, meetingId }
-              });
-            }
-
-            return createdTask._id;
-          });
-
-          const createdTaskIds = await Promise.all(taskPromises);
-          meetingWithTranscript.actionItems = createdTaskIds;
-        }
-
-        await meetingWithTranscript.save();
-        await invalidateMeetingCaches(meetingWithTranscript.host, meetingId);
-
-        // Notify participants that AI summary is ready
-        try {
-          const io = getIO();
-          io.to(`meeting:${meetingWithTranscript.meetingCode}`).emit('ai:summary-ready', { meetingId });
-        } catch (sErr) {}
-
-        // Send push notification to all participants
-        for (const p of meetingWithTranscript.participants) {
-          await notificationService.createAndSend({
-            recipient: p.user,
-            sender: meetingWithTranscript.host,
-            type: 'ai_summary_ready',
-            title: 'Meeting Summary Ready',
-            message: `AI Summary and Action Items for meeting "${meetingWithTranscript.title}" are now ready.`,
-            data: { meetingId }
-          });
-        }
-
-        logger.info(`Async AI summary extraction completed for meeting: ${meetingId}`);
-      } catch (aiErr) {
-        logger.error(`Failed during background AI summary processing for meeting ${meetingId}: ${aiErr.message}`);
-      }
-    })();
+    // 2. Queue asynchronous AI generation (summaries + action items)
+    await aiProcessingService.queueMeetingIntelligence(meetingId);
   }
 
   res.status(200).json(new ApiResponse(200, null, 'Successfully left the meeting'));
@@ -537,10 +523,53 @@ const updateMeeting = asyncHandler(async (req, res) => {
 });
 
 /**
- * @route   DELETE /api/v1/meetings/:meetingId
- * @desc    Cancel a meeting room (host only)
+ * @route   POST /api/v1/meetings/:meetingId/cancel
+ * @desc    Cancel a scheduled/live meeting without deleting history (host only)
  * @access  Private (host only)
- * @returns { ApiResponse } 200 OK success message
+ */
+const cancelMeeting = asyncHandler(async (req, res) => {
+  const { meetingId } = req.params;
+  const userId = req.user._id;
+
+  const meeting = await Meeting.findById(meetingId);
+  if (!meeting) {
+    throw new ApiError(404, 'Meeting not found');
+  }
+
+  if (meeting.host.toString() !== userId.toString()) {
+    throw new ApiError(403, 'Forbidden: Only the meeting host can cancel the meeting');
+  }
+
+  meeting.status = 'cancelled';
+  await meeting.save();
+  await invalidateMeetingCaches(userId, meetingId);
+
+  const participantsList = meeting.participants.map((p) => p.user);
+  for (const participantId of participantsList) {
+    if (participantId.toString() !== userId.toString()) {
+      await notificationService.createAndSend({
+        recipient: participantId,
+        sender: userId,
+        type: 'meeting_invite',
+        title: 'Meeting Cancelled',
+        message: `The meeting: "${meeting.title}" has been cancelled.`,
+        data: { meetingId },
+      });
+    }
+  }
+
+  try {
+    const io = getIO();
+    io.to(`meeting:${meeting.meetingCode}`).emit('meeting:cancelled', { meetingId });
+  } catch (sockErr) {}
+
+  res.status(200).json(new ApiResponse(200, null, 'Meeting cancelled successfully'));
+});
+
+/**
+ * @route   DELETE /api/v1/meetings/:meetingId
+ * @desc    Permanently delete meeting, AI data, and recording file (host only)
+ * @access  Private (host only)
  */
 const deleteMeeting = asyncHandler(async (req, res) => {
   const { meetingId } = req.params;
@@ -551,37 +580,20 @@ const deleteMeeting = asyncHandler(async (req, res) => {
     throw new ApiError(404, 'Meeting not found');
   }
 
-  // Ensure requester is host
   if (meeting.host.toString() !== userId.toString()) {
-    throw new ApiError(403, 'Forbidden: Only the meeting host can cancel the meeting');
+    throw new ApiError(403, 'Forbidden: Only the meeting host can delete this meeting');
   }
 
-  meeting.status = 'cancelled';
-  await meeting.save();
+  await deleteMeetingRecordingAssets(meeting);
+  await Meeting.findByIdAndDelete(meetingId);
   await invalidateMeetingCaches(userId, meetingId);
 
-  // Send notifications to all participants
-  const participantsList = meeting.participants.map(p => p.user);
-  for (const participantId of participantsList) {
-    if (participantId.toString() !== userId.toString()) {
-      await notificationService.createAndSend({
-        recipient: participantId,
-        sender: userId,
-        type: 'meeting_invite',
-        title: 'Meeting Cancelled',
-        message: `The meeting: "${meeting.title}" has been cancelled.`,
-        data: { meetingId }
-      });
-    }
-  }
-
-  // Emit socket cancellation to room
   try {
     const io = getIO();
-    io.to(`meeting:${meeting.meetingCode}`).emit('meeting:cancelled', { meetingId });
+    io.to(`meeting:${meeting.meetingCode}`).emit('meeting:deleted', { meetingId });
   } catch (sockErr) {}
 
-  res.status(200).json(new ApiResponse(200, null, 'Meeting cancelled successfully'));
+  res.status(200).json(new ApiResponse(200, null, 'Meeting and recording deleted permanently'));
 });
 
 /**
@@ -644,31 +656,146 @@ const stopRecording = asyncHandler(async (req, res) => {
   const bucketName = process.env.AWS_S3_BUCKET_NAME || 'intellmeet-recordings';
   const s3Url = `https://${bucketName}.s3.${region}.amazonaws.com/${s3Key}`;
 
+  const duration = parseInt(req.body.duration || '0', 10);
+
   meeting.recording.isRecording = false;
   meeting.recording.s3Key = s3Key;
   meeting.recording.s3Url = s3Url;
+  meeting.recording.duration = Number.isFinite(duration) ? duration : 0;
   await meeting.save();
   await invalidateMeetingCaches(userId, meetingId);
 
-  // Notify participants of recording availability
-  const participantsList = meeting.participants.map(p => p.user);
-  for (const participantId of participantsList) {
-    await notificationService.createAndSend({
-      recipient: participantId,
-      sender: userId,
-      type: 'recording_ready',
-      title: 'Meeting Recording Ready',
-      message: `The recording for "${meeting.title}" is now available to download.`,
-      data: { meetingId, s3Url }
-    });
-  }
-
-  try {
-    const io = getIO();
-    io.to(`meeting:${meeting.meetingCode}`).emit('meeting:recording-stopped', { s3Url });
-  } catch (sockErr) {}
+  await notifyRecordingReady(meeting, userId, s3Url);
 
   res.status(200).json(new ApiResponse(200, { s3Url }, 'Meeting recording stopped and saved'));
+});
+
+/**
+ * @route   POST /api/v1/meetings/:meetingId/recording/upload
+ * @desc    Upload recorded meeting media and attach to meeting (host only)
+ * @access  Private (host only)
+ */
+const uploadMeetingRecording = asyncHandler(async (req, res) => {
+  const { meetingId } = req.params;
+  const userId = req.user._id;
+
+  if (!req.file) {
+    throw new ApiError(400, 'Recording file is required');
+  }
+
+  const meeting = await Meeting.findById(meetingId);
+  if (!meeting) {
+    throw new ApiError(404, 'Meeting not found');
+  }
+
+  if (meeting.host.toString() !== userId.toString()) {
+    throw new ApiError(403, 'Forbidden: Only host can upload meeting recordings');
+  }
+
+  const duration = parseInt(req.body.duration || '0', 10);
+  const contentType = recordingUpload.resolveRecordingContentType(req.file);
+  const extension = contentType.includes('mp4') ? 'mp4' : 'webm';
+  const s3Key = `recordings/${meetingId}/${Date.now()}.${extension}`;
+
+  let stored;
+  try {
+    stored = await recordingStorage.saveRecording(req.file.buffer, s3Key, contentType);
+  } catch (uploadErr) {
+    throw new ApiError(500, `Failed to save recording: ${uploadErr.message}`);
+  }
+
+  const s3Url = stored.s3Url || null;
+
+  meeting.recording.isRecording = false;
+  meeting.recording.s3Key = s3Key;
+  meeting.recording.s3Url = s3Url;
+  meeting.recording.duration = Number.isFinite(duration) ? duration : 0;
+  await meeting.save();
+  await invalidateMeetingCaches(userId, meetingId);
+
+  const playbackHint = s3Url || (await recordingStorage.getPlaybackUrl(meetingId, s3Key));
+  await notifyRecordingReady(meeting, userId, playbackHint);
+
+  res.status(200).json(
+    new ApiResponse(
+      200,
+      { s3Key, s3Url: playbackHint, duration: meeting.recording.duration, storage: stored.storage },
+      'Meeting recording uploaded successfully'
+    )
+  );
+});
+
+/**
+ * @route   GET /api/v1/meetings/:meetingId/recording/playback
+ * @desc    Get secure playback URL for meeting recording
+ * @access  Private (participant only)
+ */
+const getRecordingPlayback = asyncHandler(async (req, res) => {
+  const { meetingId } = req.params;
+  const userId = req.user._id;
+
+  const meeting = await Meeting.findById(meetingId).select('host participants recording meetingCode title');
+  if (!meeting) {
+    throw new ApiError(404, 'Meeting not found');
+  }
+
+  assertMeetingParticipantAccess(meeting, userId);
+
+  if (!meeting.recording?.s3Key) {
+    throw new ApiError(404, 'No recording available for this meeting');
+  }
+
+  const storageType = await recordingStorage.getStorageType(meeting.recording.s3Key);
+  const playbackUrl = await recordingStorage.getPlaybackUrl(meetingId, meeting.recording.s3Key);
+
+  res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        playbackUrl,
+        duration: meeting.recording.duration || 0,
+        s3Key: meeting.recording.s3Key,
+        storage: storageType,
+      },
+      'Recording playback URL generated'
+    )
+  );
+});
+
+/**
+ * @route   GET /api/v1/meetings/:meetingId/recording/stream
+ * @desc    Stream locally stored recording (when S3 is not configured)
+ * @access  Private (participant only)
+ */
+const streamRecording = asyncHandler(async (req, res) => {
+  const { meetingId } = req.params;
+  const userId = req.user._id;
+
+  const meeting = await Meeting.findById(meetingId).select('host participants recording');
+  if (!meeting) {
+    throw new ApiError(404, 'Meeting not found');
+  }
+
+  assertMeetingParticipantAccess(meeting, userId);
+
+  if (!meeting.recording?.s3Key) {
+    throw new ApiError(404, 'No recording available for this meeting');
+  }
+
+  const hasLocalFile = await recordingStorage.localFileExists(meeting.recording.s3Key);
+  if (!hasLocalFile) {
+    throw new ApiError(
+      404,
+      'Recording is stored in cloud storage. Use the playback URL from GET /recording/playback'
+    );
+  }
+
+  const filePath = recordingStorage.resolveLocalFilePath(meeting.recording.s3Key);
+
+  const ext = path.extname(filePath).toLowerCase();
+  const contentType = ext === '.mp4' ? 'video/mp4' : 'video/webm';
+  res.setHeader('Content-Type', contentType);
+  res.sendFile(path.resolve(filePath));
 });
 
 /**
@@ -716,8 +843,12 @@ module.exports = {
   joinMeeting,
   leaveMeeting,
   updateMeeting,
+  cancelMeeting,
   deleteMeeting,
   startRecording,
   stopRecording,
+  uploadMeetingRecording,
+  getRecordingPlayback,
+  streamRecording,
   getMeetingSummary
 };

@@ -12,17 +12,23 @@ const reorderTasks = async (taskReorderList) => {
       return false;
     }
 
-    const bulkOps = taskReorderList.map((item) => ({
-      updateOne: {
-        filter: { _id: item.taskId },
-        update: {
-          $set: {
-            order: item.order,
-            status: item.status
-          }
-        }
+    const bulkOps = taskReorderList.map((item) => {
+      const updateFields = {
+        order: item.order,
+        status: item.status,
+      };
+      if (item.status === 'done') {
+        updateFields.completedAt = new Date();
+      } else {
+        updateFields.completedAt = null;
       }
-    }));
+      return {
+        updateOne: {
+          filter: { _id: item.taskId },
+          update: { $set: updateFields },
+        },
+      };
+    });
 
     const result = await Task.bulkWrite(bulkOps);
     logger.info(`Kanban bulk reorder complete. Modified documents: ${result.modifiedCount}`);

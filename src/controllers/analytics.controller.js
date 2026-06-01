@@ -12,6 +12,18 @@ const asyncHandler = require('../utils/asyncHandler');
  * @query   { startDate, endDate }
  * @returns { ApiResponse } 200 OK status with personal analytics summary
  */
+/**
+ * @route   GET /api/v1/analytics/dashboard
+ * @desc    Live dashboard KPIs (current tasks + 30-day activity)
+ * @access  Private
+ */
+const getDashboardStats = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const stats = await analyticsService.getDashboardStats(userId);
+
+  res.status(200).json(new ApiResponse(200, stats, 'Dashboard stats fetched'));
+});
+
 const getPersonalStats = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   
@@ -91,7 +103,8 @@ const getMeetingStats = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  getDashboardStats,
   getPersonalStats,
   getTeamStats,
-  getMeetingStats
+  getMeetingStats,
 };

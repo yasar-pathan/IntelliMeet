@@ -1,5 +1,6 @@
 const redis = require('../config/redis');
 const User = require('../models/User');
+const Meeting = require('../models/Meeting');
 const logger = require('../utils/logger');
 
 const registerMeetingHandlers = (io, socket) => {
@@ -7,14 +8,31 @@ const registerMeetingHandlers = (io, socket) => {
   // 1. Join Meeting Room
   socket.on('meeting:join-room', async ({ meetingCode }) => {
     if (!meetingCode) return;
-    
-    const roomName = `meeting:${meetingCode}`;
-    socket.join(roomName);
-    
-    // Track meeting code on socket object
-    socket.meetingCode = meetingCode;
-    
+
     try {
+      const meeting = await Meeting.findOne({ meetingCode }).select('_id host participants');
+      if (!meeting) {
+        socket.emit('meeting:error', { message: 'Meeting room not found' });
+        return;
+      }
+
+      const userId = socket.user._id.toString();
+      const isHost = meeting.host.toString() === userId;
+      const isActiveParticipant = meeting.participants.some(
+        (participant) => participant.user.toString() === userId && !participant.leftAt
+      );
+      if (!isHost && !isActiveParticipant) {
+        socket.emit('meeting:error', { message: 'Join meeting via API before opening room socket' });
+        return;
+      }
+
+      const roomName = `meeting:${meetingCode}`;
+      socket.join(roomName);
+
+      // Track meeting context on socket object
+      socket.meetingCode = meetingCode;
+      socket.activeMeetingId = meeting._id.toString();
+
       const user = await User.findById(socket.user._id, 'name avatar');
       const userInfo = {
         socketId: socket.id,
@@ -58,6 +76,7 @@ const registerMeetingHandlers = (io, socket) => {
     const roomName = `meeting:${meetingCode}`;
     socket.leave(roomName);
     socket.meetingCode = null;
+    socket.activeMeetingId = null;
 
     // Broadcast departure
     socket.to(roomName).emit('meeting:user-left', {
@@ -163,6 +182,7 @@ const registerMeetingHandlers = (io, socket) => {
   socket.on('meeting:transcript-chunk', async ({ meetingId, text, timestamp, speakerName }) => {
     const meetingCode = socket.meetingCode;
     if (!meetingCode || !meetingId || !text) return;
+    if (socket.activeMeetingId !== meetingId.toString()) return;
 
     const roomName = `meeting:${meetingCode}`;
     const formattedChunk = `[${timestamp || new Date().toISOString()}] ${speakerName || 'Speaker'}: ${text}\n`;

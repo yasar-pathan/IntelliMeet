@@ -13,5 +13,6 @@ router.post('/summarize/:meetingId', aiController.summarizeMeeting);
 router.post('/extract-actions/:meetingId', aiController.extractActions);
 router.post('/generate-agenda', aiController.generateAgenda);
 router.get('/productivity/:meetingId', aiController.getProductivityAnalysis);
+router.get('/status/:meetingId', aiController.getAiProcessingStatus);
 
 module.exports = router;

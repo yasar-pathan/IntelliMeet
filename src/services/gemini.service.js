@@ -1,4 +1,8 @@
-const { geminiPro, geminiFlash } = require('../config/gemini');
+const {
+  getGenerativeModel,
+  PRO_MODEL_CANDIDATES,
+  FLASH_MODEL_CANDIDATES,
+} = require('../config/gemini');
 const logger = require('../utils/logger');
 
 const SUMMARY_SCHEMA_HINT = `{
@@ -8,6 +12,8 @@ const SUMMARY_SCHEMA_HINT = `{
   "openQuestions": ["List of open questions or unresolved items. Empty array if none."],
   "sentiment": "Overall meeting sentiment (Productive, Neutral, or Inconclusive)."
 }`;
+
+const LOCAL_FALLBACK_MARKER = 'generated locally from your meeting transcript';
 
 const parseModelJson = (rawText) => {
   if (!rawText) throw new Error('Empty model response');
@@ -52,9 +58,6 @@ Return only the JSON string. No markdown fences.
   };
 };
 
-/**
- * Build a readable summary from transcript when AI is unavailable.
- */
 const buildHeuristicSummary = (transcript, meetingTitle, duration) => {
   const lines = transcript
     .split('\n')
@@ -95,12 +98,29 @@ const buildHeuristicSummary = (transcript, meetingTitle, duration) => {
       .filter((p) => /\?|follow up|next step|todo|action/i.test(p))
       .slice(0, 5),
     sentiment: uniquePoints.length >= 5 ? 'Productive' : 'Neutral',
+    isLocalFallback: true,
   };
 };
 
-/**
- * Generate a meeting summary using Gemini (Pro, then Flash), with transcript-based fallback.
- */
+const tryModelsInOrder = async (modelNames, fn) => {
+  const tried = new Set();
+  for (const name of modelNames) {
+    if (tried.has(name)) continue;
+    tried.add(name);
+    try {
+      const model = getGenerativeModel(name);
+      const result = await fn(model, name);
+      if (result !== undefined && result !== null) {
+        logger.info(`Gemini success with model: ${name}`);
+        return result;
+      }
+    } catch (error) {
+      logger.warn(`Gemini model "${name}" failed: ${error.message}`);
+    }
+  }
+  return null;
+};
+
 const generateMeetingSummary = async (transcript, meetingTitle, duration) => {
   if (!transcript || transcript.trim() === '') {
     return {
@@ -112,38 +132,31 @@ const generateMeetingSummary = async (transcript, meetingTitle, duration) => {
     };
   }
 
-  const models = [
-    { name: 'pro', model: geminiPro },
-    { name: 'flash', model: geminiFlash },
-  ];
-
-  for (const { name, model } of models) {
-    try {
-      const result = await callSummaryModel(model, transcript, meetingTitle, duration);
-      if (result.summary?.trim()) {
-        return result;
-      }
-    } catch (error) {
-      logger.warn(`Gemini ${name} summary attempt failed: ${error.message}`);
+  const allModels = [...PRO_MODEL_CANDIDATES, ...FLASH_MODEL_CANDIDATES];
+  const aiResult = await tryModelsInOrder(allModels, async (model) => {
+    const result = await callSummaryModel(model, transcript, meetingTitle, duration);
+    if (result.summary?.trim()) {
+      return { ...result, isLocalFallback: false };
     }
+    return null;
+  });
+
+  if (aiResult) {
+    return aiResult;
   }
 
   logger.warn(`All Gemini summary attempts failed for "${meetingTitle}". Using transcript heuristic.`);
   return buildHeuristicSummary(transcript, meetingTitle, duration);
 };
 
-/**
- * Extract action items from a transcript using Gemini.
- */
 const extractActionItems = async (transcript, participants = []) => {
-  try {
-    if (!transcript || transcript.trim() === '') {
-      return [];
-    }
+  if (!transcript || transcript.trim() === '') {
+    return [];
+  }
 
-    const systemPrompt =
-      'You are an expert at identifying action items and tasks from meeting discussions. Return the results in a valid JSON array format.';
-    const userPrompt = `
+  const systemPrompt =
+    'You are an expert at identifying action items and tasks from meeting discussions. Return the results in a valid JSON array format.';
+  const userPrompt = `
 Participants list: ${participants.join(', ')}
 Transcript:
 ${transcript.slice(0, 120000)}
@@ -161,34 +174,39 @@ Each item must follow this schema:
 Return only the JSON string.
 `;
 
-    const tryModel = async (model) => {
-      const result = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-        generationConfig: { responseMimeType: 'application/json' },
-      });
-      const raw = result.response.text();
-      const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-      const start = cleaned.indexOf('[');
-      const end = cleaned.lastIndexOf(']');
-      return JSON.parse(cleaned.slice(start, end + 1));
-    };
-
-    try {
-      return await tryModel(geminiPro);
-    } catch {
-      return await tryModel(geminiFlash);
+  const tryExtract = async (model) => {
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
+      generationConfig: { responseMimeType: 'application/json' },
+    });
+    const raw = result.response.text();
+    const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    const start = cleaned.indexOf('[');
+    const end = cleaned.lastIndexOf(']');
+    if (start === -1 || end === -1) {
+      throw new Error('Model response did not contain JSON array');
     }
-  } catch (error) {
-    logger.error(`Error extracting action items: ${error.message}`);
-    return [];
+    return JSON.parse(cleaned.slice(start, end + 1));
+  };
+
+  const allModels = [...PRO_MODEL_CANDIDATES, ...FLASH_MODEL_CANDIDATES];
+  const items = await tryModelsInOrder(allModels, async (model) => {
+    const parsed = await tryExtract(model);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
+  });
+
+  if (items) {
+    return items;
   }
+
+  logger.error('Error extracting action items: all Gemini models failed');
+  return [];
 };
 
 const generateMeetingAgenda = async (title, description, duration = 30, teamContext = '') => {
-  try {
-    const systemPrompt =
-      'You are an expert project manager. Suggest a structured meeting agenda with time allocations.';
-    const userPrompt = `
+  const systemPrompt =
+    'You are an expert project manager. Suggest a structured meeting agenda with time allocations.';
+  const userPrompt = `
 Meeting Title: ${title}
 Description: ${description}
 Expected Duration: ${duration} minutes
@@ -199,30 +217,32 @@ The sum of minutes must match the total duration of ${duration} minutes.
 Return only the JSON string.
 `;
 
-    const result = await geminiFlash.generateContent({
+  const agenda = await tryModelsInOrder(FLASH_MODEL_CANDIDATES, async (model) => {
+    const result = await model.generateContent({
       contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
       generationConfig: { responseMimeType: 'application/json' },
     });
-
     const responseText = result.response.text();
     const cleaned = responseText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
     const start = cleaned.indexOf('[');
     const end = cleaned.lastIndexOf(']');
     return JSON.parse(cleaned.slice(start, end + 1));
-  } catch (error) {
-    logger.error(`Error generating meeting agenda: ${error.message}`);
-    return [
-      `Welcome & Roll Call - 5 min`,
-      `Main Discussion: ${title} - ${duration - 10} min`,
-      `Wrap-up & Action Items - 5 min`,
-    ];
+  });
+
+  if (agenda) {
+    return agenda;
   }
+
+  return [
+    `Welcome & Roll Call - 5 min`,
+    `Main Discussion: ${title} - ${duration - 10} min`,
+    `Wrap-up & Action Items - 5 min`,
+  ];
 };
 
 const analyzeMeetingProductivity = async (meetingData) => {
-  try {
-    const systemPrompt = 'You are an expert in workplace analytics and team dynamics.';
-    const userPrompt = `
+  const systemPrompt = 'You are an expert in workplace analytics and team dynamics.';
+  const userPrompt = `
 Meeting Metrics:
 - Duration: ${meetingData.duration} minutes
 - Number of Participants: ${meetingData.participantCount}
@@ -233,33 +253,36 @@ Analyze these metrics and provide productivity score (0-100), reasoning, and sug
 Return JSON: { "score": 85, "reasoning": "...", "suggestions": ["..."] }
 `;
 
-    const result = await geminiFlash.generateContent({
+  const analysis = await tryModelsInOrder(FLASH_MODEL_CANDIDATES, async (model) => {
+    const result = await model.generateContent({
       contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
       generationConfig: { responseMimeType: 'application/json' },
     });
-
     return parseModelJson(result.response.text());
-  } catch (error) {
-    logger.error(`Error analyzing meeting productivity: ${error.message}`);
-    return {
-      score: 70,
-      reasoning: 'Score estimated from meeting duration, participation, and task output.',
-      suggestions: [
-        'Circulate a written agenda before each session.',
-        'Assign owners to action items before ending the call.',
-      ],
-    };
+  });
+
+  if (analysis) {
+    return analysis;
   }
+
+  return {
+    score: 70,
+    reasoning: 'Score estimated from meeting duration, participation, and task output.',
+    suggestions: [
+      'Circulate a written agenda before each session.',
+      'Assign owners to action items before ending the call.',
+    ],
+  };
 };
 
 const transcribeAudio = async (audioBuffer, mimeType) => {
-  try {
-    if (!audioBuffer) {
-      throw new Error('No audio buffer provided');
-    }
+  if (!audioBuffer) {
+    throw new Error('No audio buffer provided');
+  }
 
-    const base64Audio = audioBuffer.toString('base64');
-    const result = await geminiFlash.generateContent({
+  const base64Audio = audioBuffer.toString('base64');
+  const transcript = await tryModelsInOrder(FLASH_MODEL_CANDIDATES, async (model) => {
+    const result = await model.generateContent({
       contents: [
         {
           role: 'user',
@@ -272,12 +295,14 @@ const transcribeAudio = async (audioBuffer, mimeType) => {
         },
       ],
     });
+    const text = result.response.text();
+    return text?.trim() ? text : null;
+  });
 
-    return result.response.text();
-  } catch (error) {
-    logger.error(`Error transcribing audio with Gemini: ${error.message}`);
-    throw error;
+  if (!transcript) {
+    throw new Error('All Gemini models failed to transcribe audio');
   }
+  return transcript;
 };
 
 module.exports = {
@@ -287,4 +312,5 @@ module.exports = {
   analyzeMeetingProductivity,
   transcribeAudio,
   buildHeuristicSummary,
+  LOCAL_FALLBACK_MARKER,
 };

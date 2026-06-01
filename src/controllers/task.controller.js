@@ -17,6 +17,43 @@ const emitTaskSocketUpdate = (teamId, event, data) => {
   } catch (err) {}
 };
 
+const getUserTeamIds = async (userId) => {
+  const teams = await Team.find({ 'members.user': userId }).select('_id');
+  return teams.map((team) => team._id.toString());
+};
+
+const ensureTeamAccess = async (teamId, userId) => {
+  if (!teamId) return null;
+  const teamDoc = await Team.findById(teamId).select('members');
+  if (!teamDoc) {
+    throw new ApiError(404, 'Team not found');
+  }
+  const isMember = teamDoc.members.some((m) => m.user.toString() === userId.toString());
+  if (!isMember) {
+    throw new ApiError(403, 'Forbidden: You are not a member of this team');
+  }
+  return teamDoc;
+};
+
+const assertTaskAccess = async (task, userId) => {
+  if (!task) {
+    throw new ApiError(404, 'Task not found');
+  }
+
+  const isAssignee = task.assignee && task.assignee.toString() === userId.toString();
+  const isAssigner = task.assignedBy && task.assignedBy.toString() === userId.toString();
+  if (isAssignee || isAssigner) {
+    return;
+  }
+
+  if (task.team) {
+    await ensureTeamAccess(task.team, userId);
+    return;
+  }
+
+  throw new ApiError(403, 'Forbidden: You do not have access to this task');
+};
+
 /**
  * @route   GET /api/v1/tasks
  * @desc    Get paginated tasks list matching query filters
@@ -25,15 +62,34 @@ const emitTaskSocketUpdate = (teamId, event, data) => {
  * @returns { ApiResponse } 200 OK status with tasks list
  */
 const getTasks = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
   const page = parseInt(req.query.page || '1', 10);
   const limit = parseInt(req.query.limit || '10', 10);
   const skip = (page - 1) * limit;
+  const userTeamIds = await getUserTeamIds(userId);
 
-  const filter = {};
-  if (req.query.assignee) filter.assignee = req.query.assignee;
+  const filter = {
+    $or: [
+      { assignedBy: userId },
+      { assignee: userId },
+      ...(userTeamIds.length > 0 ? [{ team: { $in: userTeamIds } }] : [])
+    ]
+  };
+
+  if (req.query.team) {
+    if (!userTeamIds.includes(req.query.team)) {
+      throw new ApiError(403, 'Forbidden: You are not a member of this team');
+    }
+    filter.team = req.query.team;
+  }
+
+  if (req.query.assignee === 'unassigned') {
+    filter.assignee = null;
+  } else if (req.query.assignee) {
+    filter.assignee = req.query.assignee;
+  }
   if (req.query.status) filter.status = req.query.status;
   if (req.query.priority) filter.priority = req.query.priority;
-  if (req.query.team) filter.team = req.query.team;
   if (req.query.meeting) filter.meeting = req.query.meeting;
 
   if (req.query.startDueDate || req.query.endDueDate) {
@@ -75,21 +131,28 @@ const createTask = asyncHandler(async (req, res) => {
 
   // Validate team membership if linked to team
   if (team) {
-    const teamDoc = await Team.findById(team);
-    if (!teamDoc) {
-      throw new ApiError(404, 'Team not found');
+    const teamDoc = await ensureTeamAccess(team, assignedBy);
+    if (assignee) {
+      const assigneeInTeam = teamDoc.members.some((member) => member.user.toString() === assignee.toString());
+      if (!assigneeInTeam) {
+        throw new ApiError(400, 'Assignee must be a member of the selected team');
+      }
     }
+  } else if (assignee && assignee.toString() !== assignedBy.toString()) {
+    throw new ApiError(400, 'Standalone tasks can only be assigned to yourself');
   }
 
   // Get next order index for Kanban position
   const orderCount = await Task.countDocuments({ team, status: 'todo' });
+
+  const resolvedAssignee = assignee || (!team ? assignedBy : undefined);
 
   const task = await Task.create({
     title,
     description,
     meeting,
     team,
-    assignee,
+    assignee: resolvedAssignee,
     assignedBy,
     priority,
     dueDate,
@@ -101,9 +164,9 @@ const createTask = asyncHandler(async (req, res) => {
     .populate('assignedBy', 'name avatar');
 
   // Trigger notification if assignee exists
-  if (assignee && assignee.toString() !== assignedBy.toString()) {
+  if (resolvedAssignee && resolvedAssignee.toString() !== assignedBy.toString()) {
     await notificationService.createAndSend({
-      recipient: assignee,
+      recipient: resolvedAssignee,
       sender: assignedBy,
       type: 'task_assigned',
       title: 'Task Assigned',
@@ -125,6 +188,7 @@ const createTask = asyncHandler(async (req, res) => {
  */
 const getTaskById = asyncHandler(async (req, res) => {
   const { taskId } = req.params;
+  const userId = req.user._id;
 
   const task = await Task.findById(taskId)
     .populate('assignee', 'name avatar email')
@@ -132,9 +196,7 @@ const getTaskById = asyncHandler(async (req, res) => {
     .populate('comments.user', 'name avatar')
     .populate('meeting', 'title meetingCode');
 
-  if (!task) {
-    throw new ApiError(404, 'Task not found');
-  }
+  await assertTaskAccess(task, userId);
 
   res.status(200).json(new ApiResponse(200, task, 'Task details retrieved'));
 });
@@ -151,9 +213,7 @@ const updateTask = asyncHandler(async (req, res) => {
   const userId = req.user._id;
 
   const task = await Task.findById(taskId);
-  if (!task) {
-    throw new ApiError(404, 'Task not found');
-  }
+  await assertTaskAccess(task, userId);
 
   const oldAssignee = task.assignee;
 
@@ -171,6 +231,15 @@ const updateTask = asyncHandler(async (req, res) => {
   }
 
   if (assignee !== undefined) {
+    if (task.team) {
+      const teamDoc = await ensureTeamAccess(task.team, userId);
+      const assigneeInTeam = teamDoc.members.some((member) => member.user.toString() === assignee.toString());
+      if (!assigneeInTeam) {
+        throw new ApiError(400, 'Assignee must be a member of this task team');
+      }
+    } else if (assignee.toString() !== userId.toString()) {
+      throw new ApiError(400, 'Standalone tasks can only be assigned to yourself');
+    }
     task.assignee = assignee;
   }
 
@@ -205,11 +274,10 @@ const updateTask = asyncHandler(async (req, res) => {
  */
 const deleteTask = asyncHandler(async (req, res) => {
   const { taskId } = req.params;
+  const userId = req.user._id;
 
   const task = await Task.findById(taskId);
-  if (!task) {
-    throw new ApiError(404, 'Task not found');
-  }
+  await assertTaskAccess(task, userId);
 
   task.status = 'cancelled';
   await task.save();
@@ -229,11 +297,10 @@ const deleteTask = asyncHandler(async (req, res) => {
 const updateTaskStatus = asyncHandler(async (req, res) => {
   const { taskId } = req.params;
   const { status } = req.body;
+  const userId = req.user._id;
 
   const task = await Task.findById(taskId);
-  if (!task) {
-    throw new ApiError(404, 'Task not found');
-  }
+  await assertTaskAccess(task, userId);
 
   task.status = status;
   if (status === 'done') {
@@ -265,9 +332,7 @@ const addTaskComment = asyncHandler(async (req, res) => {
   const userId = req.user._id;
 
   const task = await Task.findById(taskId);
-  if (!task) {
-    throw new ApiError(404, 'Task not found');
-  }
+  await assertTaskAccess(task, userId);
 
   task.comments.push({
     user: userId,
@@ -308,6 +373,21 @@ const addTaskComment = asyncHandler(async (req, res) => {
  */
 const reorderTasksEndpoint = asyncHandler(async (req, res) => {
   const { tasks } = req.body;
+  const userId = req.user._id;
+
+  if (!Array.isArray(tasks) || tasks.length === 0) {
+    throw new ApiError(400, 'Tasks payload cannot be empty');
+  }
+
+  const taskIds = tasks.map((entry) => entry.taskId);
+  const existingTasks = await Task.find({ _id: { $in: taskIds } }).select('_id team assignee assignedBy');
+  if (existingTasks.length !== taskIds.length) {
+    throw new ApiError(404, 'One or more tasks were not found');
+  }
+
+  for (const task of existingTasks) {
+    await assertTaskAccess(task, userId);
+  }
 
   await taskService.reorderTasks(tasks);
 

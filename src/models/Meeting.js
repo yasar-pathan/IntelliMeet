@@ -94,6 +94,17 @@ const meetingSchema = new mongoose.Schema(
       sentiment: { type: String },
       generatedAt: { type: Date }
     },
+    aiProcessing: {
+      status: {
+        type: String,
+        enum: ['idle', 'queued', 'processing', 'completed', 'failed'],
+        default: 'idle'
+      },
+      lastRunAt: { type: Date },
+      lastSuccessAt: { type: Date },
+      retryCount: { type: Number, default: 0 },
+      error: { type: String }
+    },
     actionItems: [
       {
         type: mongoose.Schema.Types.ObjectId,

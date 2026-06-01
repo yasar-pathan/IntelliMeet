@@ -49,9 +49,18 @@ const errorMiddleware = (err, req, res, next) => {
 
   // Handle Multer errors
   if (err.code === 'LIMIT_FILE_SIZE') {
-    error = new ApiError(400, 'File upload size limit exceeded (max 10MB)');
+    const isRecordingUpload = req.originalUrl && req.originalUrl.includes('/recording/upload');
+    error = new ApiError(
+      400,
+      isRecordingUpload
+        ? 'Recording file exceeds the 100MB upload limit'
+        : 'File upload size limit exceeded (max 10MB)'
+    );
   }
   if (err.message && err.message.includes('multer')) {
+    error = new ApiError(400, err.message);
+  }
+  if (err.message && err.message.includes('Recording format not allowed')) {
     error = new ApiError(400, err.message);
   }
 

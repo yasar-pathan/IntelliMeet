@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Meeting = require('../models/Meeting');
 const Task = require('../models/Task');
 const Message = require('../models/Message');
+const Team = require('../models/Team');
 const logger = require('../utils/logger');
 
 const buildInsights = (ctx) => {
@@ -648,8 +649,175 @@ const getMeetingAnalytics = async (meetingId) => {
   }
 };
 
+const buildUserTaskAccessFilter = async (userId) => {
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+  const userTeamIds = await Team.find({ 'members.user': userObjectId }).distinct('_id');
+
+  return {
+    userObjectId,
+    userTeamIds,
+    filter: {
+      $or: [
+        { assignee: userObjectId },
+        { assignedBy: userObjectId },
+        ...(userTeamIds.length > 0 ? [{ team: { $in: userTeamIds } }] : []),
+      ],
+    },
+  };
+};
+
+/**
+ * Live dashboard snapshot — current task board totals + rolling 30-day activity.
+ */
+const getDashboardStats = async (userId) => {
+  const { userObjectId, filter: taskFilter } = await buildUserTaskAccessFilter(userId);
+  const endDate = new Date();
+  const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const now = new Date();
+
+  const teamCount = await Team.countDocuments({ 'members.user': userObjectId });
+
+  const meetingStats = await Meeting.aggregate([
+    {
+      $match: {
+        $or: [{ host: userObjectId }, { 'participants.user': userObjectId }],
+        createdAt: { $gte: startDate, $lte: endDate },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: 1 },
+        hosted: { $sum: { $cond: [{ $eq: ['$host', userObjectId] }, 1, 0] } },
+        avgDuration: { $avg: '$duration' },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        total: { $ifNull: ['$total', 0] },
+        hosted: { $ifNull: ['$hosted', 0] },
+        attended: {
+          $subtract: [{ $ifNull: ['$total', 0] }, { $ifNull: ['$hosted', 0] }],
+        },
+        avgDuration: { $round: [{ $ifNull: ['$avgDuration', 0] }, 1] },
+      },
+    },
+  ]);
+
+  const taskStats = await Task.aggregate([
+    { $match: taskFilter },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: 1 },
+        completed: { $sum: { $cond: [{ $eq: ['$status', 'done'] }, 1, 0] } },
+        overdue: {
+          $sum: {
+            $cond: [
+              {
+                $and: [{ $ne: ['$status', 'done'] }, { $lt: ['$dueDate', now] }],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        total: { $ifNull: ['$total', 0] },
+        completed: { $ifNull: ['$completed', 0] },
+        overdue: { $ifNull: ['$overdue', 0] },
+        completionRate: {
+          $cond: [
+            { $gt: [{ $ifNull: ['$total', 0] }, 0] },
+            {
+              $round: [
+                {
+                  $multiply: [
+                    { $divide: [{ $ifNull: ['$completed', 0] }, { $ifNull: ['$total', 0] }] },
+                    100,
+                  ],
+                },
+                1,
+              ],
+            },
+            0,
+          ],
+        },
+      },
+    },
+  ]);
+
+  const taskStatusRows = await Task.aggregate([
+    { $match: taskFilter },
+    { $group: { _id: '$status', count: { $sum: 1 } } },
+  ]);
+
+  const messageStats = await Message.aggregate([
+    { $match: { sender: userObjectId, createdAt: { $gte: startDate, $lte: endDate } } },
+    { $count: 'count' },
+  ]);
+
+  const meetingsByWeek = await Meeting.aggregate([
+    {
+      $match: {
+        $or: [{ host: userObjectId }, { 'participants.user': userObjectId }],
+        createdAt: { $gte: startDate, $lte: endDate },
+      },
+    },
+    {
+      $group: {
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+        meetings: { $sum: 1 },
+      },
+    },
+    { $sort: { _id: 1 } },
+    { $limit: 7 },
+  ]);
+
+  const meetings = meetingStats[0] || { total: 0, hosted: 0, attended: 0, avgDuration: 0 };
+  const tasks = taskStats[0] || { total: 0, completed: 0, overdue: 0, completionRate: 0 };
+  const collaboration = {
+    messagesCount: messageStats[0]?.count || 0,
+    mostActiveHour: 0,
+  };
+
+  const taskStatus = {};
+  taskStatusRows.forEach((row) => {
+    taskStatus[row._id] = row.count;
+  });
+
+  return {
+    period: { start: startDate, end: endDate },
+    meetings,
+    tasks,
+    collaboration,
+    teams: { count: teamCount },
+    trends: {
+      meetingsByWeek: meetingsByWeek.map((w) => ({
+        label: w._id,
+        meetings: w.meetings,
+      })),
+    },
+    taskStatus,
+    productivityIndex: computeProductivityIndex(meetings, tasks, collaboration),
+    insights: buildInsights({
+      meetings,
+      tasks,
+      collaboration,
+      trends: { meetingsByWeek: meetingsByWeek.map((w) => ({ label: w._id, meetings: w.meetings })) },
+    }),
+    refreshedAt: new Date().toISOString(),
+  };
+};
+
 module.exports = {
   getPersonalAnalytics,
   getTeamAnalytics,
-  getMeetingAnalytics
+  getMeetingAnalytics,
+  getDashboardStats,
 };
