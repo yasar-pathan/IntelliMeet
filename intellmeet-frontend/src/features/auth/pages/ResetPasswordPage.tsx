@@ -9,16 +9,14 @@ import { AuthLayout } from '@/features/auth/components/AuthLayout';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
-import {Lock, Eye, EyeOff } from "lucide-react";
+import { Lock, Eye, EyeOff } from 'lucide-react';
 
- 
 export const ResetPasswordPage: React.FC = () => {
   const resetPasswordMutation = useResetPassword();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = React.useState(false);
-const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
-
+  const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
   const token = searchParams.get('token');
 
   const {
@@ -36,7 +34,7 @@ const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
     }
 
     resetPasswordMutation.mutate(
-      { token, newPassword: data.password },
+      { token, newPassword: data.password, confirmPassword: data.confirmPassword },
       {
         onError: (error: any) => {
           const message = error.response?.data?.message || 'Failed to reset password.';
@@ -65,59 +63,66 @@ const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
         </div>
       ) : (
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 text-left">
-          {/* <div>
+          <div>
             <Label htmlFor="password" required>
               New Password
             </Label>
             <div className="mt-1.5">
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                error={!!errors.password}
-                {...register('password')}
-              />
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  className="pl-12 pr-10"
+                  error={!!errors.password}
+                  {...register('password')}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
               {errors.password && (
                 <p className="text-xs text-destructive mt-1.5">{errors.password.message}</p>
               )}
             </div>
-          </div> */}
-          <div className="relative">
-  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          </div>
 
-  <Input
-    id="password"
-    type={showPassword ? "text" : "password"}
-    placeholder="••••••••"
-    className="pl-10 pr-10 h-12 rounded-xl"
-    error={!!errors.password}
-    {...register('password')}
-  />
-
-  <button
-    type="button"
-    onClick={() => setShowPassword(!showPassword)}
-    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-  >
-    {showPassword ? (
-      <EyeOff className="h-4 w-4" />
-    ) : (
-      <Eye className="h-4 w-4" />
-    )}
-  </button>
-</div>
           <div>
             <Label htmlFor="confirmPassword" required>
               Confirm Password
             </Label>
             <div className="mt-1.5">
-              <Input
-                id="confirmPassword"
-                type="password"
-                placeholder="••••••••"
-                error={!!errors.confirmPassword}
-                {...register('confirmPassword')}
-              />
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="confirmPassword"
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  className="pl-12 pr-10"
+                  error={!!errors.confirmPassword}
+                  {...register('confirmPassword')}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
               {errors.confirmPassword && (
                 <p className="text-xs text-destructive mt-1.5">
                   {errors.confirmPassword.message}
@@ -128,7 +133,7 @@ const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
 
           <Button
             type="submit"
-            className="w-full mt-2"
+            className="w-full h-12 rounded-xl font-semibold shadow-lg transition-all hover:scale-[1.02]"
             isLoading={resetPasswordMutation.isPending}
           >
             Reset Password

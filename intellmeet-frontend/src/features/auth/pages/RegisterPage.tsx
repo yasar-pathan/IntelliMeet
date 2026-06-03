@@ -9,11 +9,11 @@ import { AuthLayout } from '@/features/auth/components/AuthLayout';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
-import { User, Mail, Lock, Eye, EyeOff} from "lucide-react";
+import { User, Mail, Lock, Eye, EyeOff } from 'lucide-react';
 
-// const [showPassword, setShowPassword] = React.useState(false);
 export const RegisterPage: React.FC = () => {
   const registerMutation = useRegister();
+  const [showPassword, setShowPassword] = React.useState(false);
 
   const {
     register,
@@ -42,19 +42,17 @@ export const RegisterPage: React.FC = () => {
           <Label htmlFor="name" required>
             Full Name
           </Label>
-          
-            
-            <div className="mt-1.5">
+          <div className="mt-1.5">
             <div className="relative">
-            <User className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <User className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-              id="name"
-              type="text"
-              placeholder="John Doe"
-              className="pl-12 "
-              error={!!errors.name}
-              {...register('name')}
-            />
+                id="name"
+                type="text"
+                placeholder="John Doe"
+                className="pl-12"
+                error={!!errors.name}
+                {...register('name')}
+              />
             </div>
             {errors.name && (
               <p className="text-xs text-destructive mt-1.5">{errors.name.message}</p>
@@ -68,15 +66,15 @@ export const RegisterPage: React.FC = () => {
           </Label>
           <div className="mt-1.5">
             <div className="relative">
-            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              id="email"
-              type="email"
-              placeholder="name@company.com"
-              className="pl-12 "
-              error={!!errors.email}
-              {...register('email')}
-            />
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                id="email"
+                type="email"
+                placeholder="name@company.com"
+                className="pl-12"
+                error={!!errors.email}
+                {...register('email')}
+              />
             </div>
             {errors.email && (
               <p className="text-xs text-destructive mt-1.5">{errors.email.message}</p>
@@ -90,17 +88,26 @@ export const RegisterPage: React.FC = () => {
           </Label>
           <div className="mt-1.5">
             <div className="relative">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              id="password"
-              type="password"
-              placeholder="••••••••"
-              className="pl-12 "
-              error={!!errors.password}
-              {...register('password')}
-              
-            />
-            
+              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                placeholder="••••••••"
+                className="pl-12 pr-10"
+                error={!!errors.password}
+                {...register('password')}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
             </div>
             {errors.password && (
               <p className="text-xs text-destructive mt-1.5">{errors.password.message}</p>
@@ -110,7 +117,7 @@ export const RegisterPage: React.FC = () => {
 
         <Button
           type="submit"
-          className="w-full mt-2"
+          className="w-full h-12 rounded-xl font-semibold shadow-lg transition-all hover:scale-[1.02]"
           isLoading={registerMutation.isPending}
         >
           Get Started
