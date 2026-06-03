@@ -9,11 +9,13 @@ import { AuthLayout } from '@/features/auth/components/AuthLayout';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
+// import { Mail} from "lucide-react";
+import { Mail , CheckCircle} from "lucide-react";
 
 export const ForgotPasswordPage: React.FC = () => {
   const forgotPasswordMutation = useForgotPassword();
   const [isSubmitted, setIsSubmitted] = React.useState(false);
-
+  const [submittedEmail, setSubmittedEmail] = React.useState('');
   const {
     register,
     handleSubmit,
@@ -29,20 +31,34 @@ export const ForgotPasswordPage: React.FC = () => {
         toast.error(message);
       },
       onSuccess: () => {
-        setIsSubmitted(true);
-        toast.success('Password reset link sent to your email.');
-      },
+  setSubmittedEmail(data.email);
+  setIsSubmitted(true);
+
+  toast.success(
+    'If an account exists for this email, a reset link has been sent.'
+  );
+},
     });
   };
 
   if (isSubmitted) {
     return (
       <AuthLayout title="Check your email" subtitle="We've sent a password reset link to your inbox">
-        <div className="text-center space-y-4">
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            Please follow the instructions sent to your email address to reset your password. If
-            you don't receive it in a few minutes, check your spam folder.
-          </p>
+        <div className="text-center space-y-5">
+           <div className="mx-auto w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center">
+    <Mail className="h-8 w-8 text-green-500" />
+    </div>
+          <p className="text-sm text-muted-foreground">
+  We've sent password recovery instructions to:
+</p>
+
+<p className="font-semibold text-foreground break-all">
+  {submittedEmail}
+</p>
+
+<p className="text-sm text-muted-foreground leading-relaxed">
+  Please check your inbox and spam folder. The reset link may take a few minutes to arrive.
+</p>
           <div className="pt-2">
             <Link to="/login" className="font-bold text-primary hover:underline text-sm">
               Back to Sign In
@@ -61,22 +77,30 @@ export const ForgotPasswordPage: React.FC = () => {
             Email Address
           </Label>
           <div className="mt-1.5">
-            <Input
-              id="email"
-              type="email"
-              placeholder="name@company.com"
-              error={!!errors.email}
-              {...register('email')}
-            />
-            {errors.email && (
-              <p className="text-xs text-destructive mt-1.5">{errors.email.message}</p>
-            )}
-          </div>
-        </div>
+  <div className="relative">
+    <Mail size={18} className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
 
+    <Input
+      id="email"
+      type="email"
+      placeholder="name@company.com"
+      error={!!errors.email}
+      className="pl-10"
+      {...register('email')}
+    />
+  </div>
+
+  {errors.email && (
+    <p className="text-xs text-destructive mt-1.5">
+      {errors.email.message}
+    </p>
+  )}
+</div>
+</div>
         <Button
           type="submit"
-          className="w-full mt-2"
+            disabled={forgotPasswordMutation.isPending}
+          className="w-full h-12 rounded-xl mt-2"
           isLoading={forgotPasswordMutation.isPending}
         >
           Send Instructions

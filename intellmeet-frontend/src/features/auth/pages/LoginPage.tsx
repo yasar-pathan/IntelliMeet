@@ -9,10 +9,12 @@ import { AuthLayout } from '@/features/auth/components/AuthLayout';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
+import { Eye, EyeOff } from "lucide-react";
+import { Mail, Lock} from "lucide-react";
 
 export const LoginPage: React.FC = () => {
   const loginMutation = useLogin();
-
+  const [showPassword, setShowPassword] = React.useState(false);
   const {
     register,
     handleSubmit,
@@ -41,13 +43,17 @@ export const LoginPage: React.FC = () => {
             Email Address
           </Label>
           <div className="mt-1.5">
+            <div className="relative">
+            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               id="email"
               type="email"
               placeholder="name@company.com"
+              className="pl-12"
               error={!!errors.email}
               {...register('email')}
             />
+            </div>
             {errors.email && (
               <p className="text-xs text-destructive mt-1.5">{errors.email.message}</p>
             )}
@@ -67,22 +73,48 @@ export const LoginPage: React.FC = () => {
             </Link>
           </div>
           <div className="mt-1.5">
-            <Input
-              id="password"
-              type="password"
-              placeholder="••••••••"
-              error={!!errors.password}
-              {...register('password')}
-            />
-            {errors.password && (
-              <p className="text-xs text-destructive mt-1.5">{errors.password.message}</p>
-            )}
-          </div>
+            <div className="relative">
+                        <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            
+
+    <Input
+      id="password"
+      type={showPassword ? "text" : "password"}
+      placeholder="••••••••"
+      error={!!errors.password}
+      className="pl-12"
+      {...register('password')}
+    />
+
+    <button
+      type="button"
+      onClick={() => setShowPassword(!showPassword)}
+      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+    >
+      {showPassword ? (
+        <EyeOff className="h-4 w-4" />
+      ) : (
+        <Eye className="h-4 w-4" />
+      )}
+    </button>
+  </div>
+
+  {errors.password && (
+    <p className="text-xs text-destructive mt-1.5">
+      {errors.password.message}
+    </p>
+  )}
+</div>
         </div>
 
         <Button
           type="submit"
-          className="w-full mt-2"
+          className="w-full  h-12
+    rounded-xl
+    font-semibold
+    shadow-lg
+    transition-all
+    hover:scale-[1.02]"
           isLoading={loginMutation.isPending}
         >
           Sign In
