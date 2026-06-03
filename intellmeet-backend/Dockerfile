@@ -31,6 +31,9 @@ COPY package*.json ./
 # Install ONLY production dependencies
 RUN npm ci --only=production
 
+# Install PM2 globally for production process management
+RUN npm install -g pm2
+
 # Copy application code from builder
 COPY --from=builder /usr/src/app/src ./src
 COPY --from=builder /usr/src/app/server.js ./server.js
@@ -58,4 +61,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   req.end(); \
   "
 
-CMD ["npm", "start"]
+# Run PM2 in no-daemon mode
+CMD ["pm2-runtime", "start", "server.js", "--name", "intellimeet-api"]
