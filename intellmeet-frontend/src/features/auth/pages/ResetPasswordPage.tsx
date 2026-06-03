@@ -9,11 +9,16 @@ import { AuthLayout } from '@/features/auth/components/AuthLayout';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
+import {Lock, Eye, EyeOff } from "lucide-react";
 
+ 
 export const ResetPasswordPage: React.FC = () => {
   const resetPasswordMutation = useResetPassword();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const [showPassword, setShowPassword] = React.useState(false);
+const [showConfirmPassword, setShowConfirmPassword] = React.useState(false);
+
   const token = searchParams.get('token');
 
   const {
@@ -60,7 +65,7 @@ export const ResetPasswordPage: React.FC = () => {
         </div>
       ) : (
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 text-left">
-          <div>
+          {/* <div>
             <Label htmlFor="password" required>
               New Password
             </Label>
@@ -76,8 +81,31 @@ export const ResetPasswordPage: React.FC = () => {
                 <p className="text-xs text-destructive mt-1.5">{errors.password.message}</p>
               )}
             </div>
-          </div>
+          </div> */}
+          <div className="relative">
+  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
 
+  <Input
+    id="password"
+    type={showPassword ? "text" : "password"}
+    placeholder="••••••••"
+    className="pl-10 pr-10 h-12 rounded-xl"
+    error={!!errors.password}
+    {...register('password')}
+  />
+
+  <button
+    type="button"
+    onClick={() => setShowPassword(!showPassword)}
+    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+  >
+    {showPassword ? (
+      <EyeOff className="h-4 w-4" />
+    ) : (
+      <Eye className="h-4 w-4" />
+    )}
+  </button>
+</div>
           <div>
             <Label htmlFor="confirmPassword" required>
               Confirm Password
