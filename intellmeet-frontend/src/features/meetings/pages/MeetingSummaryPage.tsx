@@ -55,7 +55,7 @@ export const MeetingSummaryPage: React.FC = () => {
     playbackData?.data?.storage === 'local' ||
     (playbackUrl && playbackUrl.includes('/recording/stream'));
 
-  const { data: recordingBlobUrl } = useQuery({
+  const { data: recordingBlobUrl } = useQuery<string, Error>({
     queryKey: ['meetings', 'recording-blob', meetingId],
     queryFn: async () => {
       const response = await api.get(`/meetings/${meetingId}/recording/stream`, {
@@ -64,7 +64,7 @@ export const MeetingSummaryPage: React.FC = () => {
       });
       return URL.createObjectURL(response.data);
     },
-    enabled: !!meetingId && hasRecording && usesAuthStream,
+    enabled: Boolean(meetingId && hasRecording && usesAuthStream),
     staleTime: Infinity,
   });
 

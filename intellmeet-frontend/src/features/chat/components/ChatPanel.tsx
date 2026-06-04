@@ -19,7 +19,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ meetingId, meetingCode }) 
 
   const [text, setText] = React.useState('');
   const bottomRef = React.useRef<HTMLDivElement>(null);
-  const typingTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const typingTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Auto-scroll on new messages
   React.useEffect(() => {
