@@ -308,9 +308,12 @@ const getMeetingByCode = asyncHandler(async (req, res) => {
 
   const isHost = meeting.host?._id?.toString() === userId.toString();
   const isParticipant = meeting.participants.some((participant) => participant.user.toString() === userId.toString());
-  const memberOfTeam = await isTeamMember(meeting.team, userId);
-  if (!isHost && !isParticipant && !memberOfTeam) {
-    throw new ApiError(403, 'Forbidden: You do not have access to this meeting code');
+  
+  if (meeting.team) {
+    const memberOfTeam = await isTeamMember(meeting.team, userId);
+    if (!isHost && !isParticipant && !memberOfTeam) {
+      throw new ApiError(403, 'Forbidden: Only team members have access to this meeting code');
+    }
   }
 
   const basicInfo = {
