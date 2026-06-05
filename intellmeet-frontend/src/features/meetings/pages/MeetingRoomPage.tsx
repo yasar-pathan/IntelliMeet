@@ -100,6 +100,7 @@ export const MeetingRoomPage: React.FC = () => {
 
   useMeetingSocket({
     meetingCode: meetingCode || '',
+    isJoined: !!activeMeeting,
     createPeerConnection,
     closePeerConnection,
     onReaction: handleReactionReceived,

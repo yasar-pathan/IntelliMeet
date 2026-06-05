@@ -5,6 +5,7 @@ import type { ParticipantInfo, TranscriptChunk } from '@/types/models';
 
 interface UseMeetingSocketProps {
   meetingCode: string;
+  isJoined: boolean;
   createPeerConnection: (socketId: string, isInitiator: boolean) => Promise<RTCPeerConnection>;
   closePeerConnection: (socketId: string) => void;
   onReaction: (reaction: { emoji: string; userId: string; socketId: string }) => void;
@@ -12,6 +13,7 @@ interface UseMeetingSocketProps {
 
 export function useMeetingSocket({
   meetingCode,
+  isJoined,
   createPeerConnection,
   closePeerConnection,
   onReaction,
@@ -33,7 +35,7 @@ export function useMeetingSocket({
   onReactionRef.current = onReaction;
 
   React.useEffect(() => {
-    if (!socket || !meetingCode) return;
+    if (!socket || !meetingCode || !isJoined) return;
 
     console.log(`[Socket] Joining meeting room: ${meetingCode}`);
 
@@ -120,6 +122,7 @@ export function useMeetingSocket({
     };
   }, [
     meetingCode,
+    isJoined,
     socket,
     addParticipant,
     removeParticipant,
