@@ -9,6 +9,8 @@ export function useLiveTranscript(meetingId: string) {
   const { appendTranscript } = useMeetingStore();
   const [isListening, setIsListening] = React.useState(false);
   const recognitionRef = React.useRef<any>(null);
+  const intentionallyStopped = React.useRef(true);
+  const retryCount = React.useRef(0);
 
   React.useEffect(() => {
     // Check SpeechRecognition compatibility
@@ -27,14 +29,29 @@ export function useLiveTranscript(meetingId: string) {
 
     rec.onstart = () => {
       setIsListening(true);
+      retryCount.current = 0;
     };
 
     rec.onend = () => {
       setIsListening(false);
+      if (!intentionallyStopped.current && retryCount.current < 5) {
+        retryCount.current += 1;
+        setTimeout(() => {
+          if (recognitionRef.current && !intentionallyStopped.current) {
+            try {
+              recognitionRef.current.start();
+            } catch (err) {}
+          }
+        }, 500);
+      }
     };
 
     rec.onerror = (event: any) => {
       console.error('[SpeechRecognition] Error occurred:', event.error);
+      const isRecoverable = event.error === 'network' || event.error === 'aborted';
+      if (!isRecoverable) {
+        intentionallyStopped.current = true;
+      }
     };
 
     rec.onresult = (event: any) => {
@@ -60,6 +77,7 @@ export function useLiveTranscript(meetingId: string) {
     recognitionRef.current = rec;
 
     return () => {
+      intentionallyStopped.current = true;
       if (recognitionRef.current) {
         recognitionRef.current.abort();
       }
@@ -67,6 +85,8 @@ export function useLiveTranscript(meetingId: string) {
   }, [meetingId, socket, user, appendTranscript]);
 
   const startTranscript = React.useCallback(() => {
+    intentionallyStopped.current = false;
+    retryCount.current = 0;
     if (recognitionRef.current && !isListening) {
       try {
         recognitionRef.current.start();
@@ -77,6 +97,7 @@ export function useLiveTranscript(meetingId: string) {
   }, [isListening]);
 
   const stopTranscript = React.useCallback(() => {
+    intentionallyStopped.current = true;
     if (recognitionRef.current && isListening) {
       recognitionRef.current.stop();
     }

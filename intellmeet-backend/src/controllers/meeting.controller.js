@@ -826,8 +826,14 @@ const getMeetingSummary = asyncHandler(async (req, res) => {
     throw new ApiError(403, 'Forbidden: Only meeting participants can view meeting summaries');
   }
 
+  let currentTranscript = meeting.transcript || '';
+  if (meeting.status === 'live' || meeting.status === 'scheduled') {
+    const liveTranscript = await redis.get(`transcript:${meetingId}`);
+    if (liveTranscript) currentTranscript = liveTranscript;
+  }
+
   const result = {
-    transcript: meeting.transcript || '',
+    transcript: currentTranscript,
     aiSummary: meeting.aiSummary || null,
     actionItems: meeting.actionItems || []
   };

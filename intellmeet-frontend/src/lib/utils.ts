@@ -46,10 +46,12 @@ export function formatDuration(minutes: number): string {
 /**
  * Get initials from a name (e.g., "John Doe" → "JD").
  */
-export function getInitials(name: string): string {
+export function getInitials(name?: string): string {
+  if (!name) return 'U';
   return name
     .split(' ')
     .map((n) => n[0])
+    .filter(Boolean)
     .join('')
     .toUpperCase()
     .slice(0, 2);

@@ -9,6 +9,7 @@ const ApiResponse = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/asyncHandler');
 const logger = require('../utils/logger');
 const { getIO } = require('../config/socket');
+const redis = require('../config/redis');
 
 const setAiProcessingStatus = async (meeting, updates) => {
   meeting.aiProcessing = {
@@ -46,7 +47,13 @@ const summarizeMeeting = asyncHandler(async (req, res) => {
 
   const meeting = await assertMeetingParticipant(meetingId, userId);
 
-  if (!meeting.transcript || meeting.transcript.trim() === '') {
+  let currentTranscript = meeting.transcript || '';
+  if (meeting.status === 'live' || meeting.status === 'scheduled') {
+    const liveTranscript = await redis.get(`transcript:${meetingId}`);
+    if (liveTranscript) currentTranscript = liveTranscript;
+  }
+
+  if (!currentTranscript || currentTranscript.trim() === '') {
     throw new ApiError(400, 'Cannot summarize a meeting with no transcript. Start the meeting and capture transcript chunks first.');
   }
 
@@ -64,7 +71,7 @@ const summarizeMeeting = asyncHandler(async (req, res) => {
   try {
     // 1. Generate summary
     const summaryResult = await geminiService.generateMeetingSummary(
-      meeting.transcript,
+      currentTranscript,
       meeting.title,
       meeting.duration || 1
     );
@@ -75,7 +82,7 @@ const summarizeMeeting = asyncHandler(async (req, res) => {
     };
 
     // 2. Extract action items and create Tasks
-    const actionItems = await geminiService.extractActionItems(meeting.transcript, participantNames);
+    const actionItems = await geminiService.extractActionItems(currentTranscript, participantNames);
     const createdTasks = [];
 
     if (actionItems && actionItems.length > 0) {
@@ -158,20 +165,26 @@ const extractActions = asyncHandler(async (req, res) => {
 
   const meeting = await assertMeetingParticipant(meetingId, userId);
 
+  let currentTranscript = meeting.transcript || '';
+  if (meeting.status === 'live' || meeting.status === 'scheduled') {
+    const liveTranscript = await redis.get(`transcript:${meetingId}`);
+    if (liveTranscript) currentTranscript = liveTranscript;
+  }
+
   await setAiProcessingStatus(meeting, {
     status: 'processing',
     lastRunAt: new Date(),
     error: null,
   });
 
-  if (!meeting.transcript || meeting.transcript.trim() === '') {
+  if (!currentTranscript || currentTranscript.trim() === '') {
     throw new ApiError(400, 'Cannot extract action items from a meeting with no transcript.');
   }
 
   const participantUsers = await User.find({ _id: { $in: meeting.participants.map(p => p.user) } }, 'name');
   const participantNames = participantUsers.map(u => u.name);
 
-  const actionItems = await geminiService.extractActionItems(meeting.transcript, participantNames);
+  const actionItems = await geminiService.extractActionItems(currentTranscript, participantNames);
   const createdTasks = [];
 
   try {
