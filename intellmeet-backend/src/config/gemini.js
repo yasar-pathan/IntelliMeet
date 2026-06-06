@@ -1,40 +1,35 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { OpenAI } = require('openai');
 const logger = require('../utils/logger');
 
-const apiKey = process.env.GEMINI_API_KEY;
+const apiKey = process.env.OPENROUTER_API_KEY;
 
 if (!apiKey) {
-  logger.warn('GEMINI_API_KEY is not defined in environment variables. AI operations will fail.');
+  logger.warn('OPENROUTER_API_KEY is not defined in environment variables. AI operations will fail.');
 }
 
-const genAI = new GoogleGenerativeAI(apiKey || 'mock_key');
+const openai = new OpenAI({
+  baseURL: 'https://openrouter.ai/api/v1',
+  apiKey: apiKey || 'mock_key',
+});
 
 const uniqueList = (items) => [...new Set(items.filter(Boolean))];
 
 const PRO_MODEL_CANDIDATES = uniqueList([
-  process.env.GEMINI_MODEL_PRO,
-  'gemini-2.5-pro',
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
-  'gemini-1.5-pro-002',
-  'gemini-1.5-pro-latest',
+  process.env.AI_MODEL_PRO,
+  'google/gemini-2.0-flash-exp:free',
+  'google/gemini-2.5-flash-lite',
+  'google/gemini-2.0-flash-lite-preview-02-05:free'
 ]);
 
 const FLASH_MODEL_CANDIDATES = uniqueList([
-  process.env.GEMINI_MODEL_FLASH,
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash-002',
-  'gemini-1.5-flash',
-  'gemini-1.5-flash-latest',
-  'gemini-pro',
+  process.env.AI_MODEL_FLASH,
+  'google/gemini-2.0-flash-exp:free',
+  'google/gemini-2.5-flash-lite',
+  'google/gemini-2.0-flash-lite-preview-02-05:free'
 ]);
 
-const getGenerativeModel = (modelName) => genAI.getGenerativeModel({ model: modelName });
-
 module.exports = {
-  genAI,
-  getGenerativeModel,
+  openai,
   PRO_MODEL_CANDIDATES,
   FLASH_MODEL_CANDIDATES,
 };

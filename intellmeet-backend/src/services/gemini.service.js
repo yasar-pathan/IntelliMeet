@@ -1,5 +1,5 @@
 const {
-  getGenerativeModel,
+  openai,
   PRO_MODEL_CANDIDATES,
   FLASH_MODEL_CANDIDATES,
 } = require('../config/gemini');
@@ -24,14 +24,20 @@ const parseModelJson = (rawText) => {
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');
   if (start === -1 || end === -1) {
+    // If it's an array for some reason
+    const arrStart = cleaned.indexOf('[');
+    const arrEnd = cleaned.lastIndexOf(']');
+    if (arrStart !== -1 && arrEnd !== -1) {
+        return JSON.parse(cleaned.slice(arrStart, arrEnd + 1));
+    }
     throw new Error('Model response did not contain JSON object');
   }
   return JSON.parse(cleaned.slice(start, end + 1));
 };
 
-const callSummaryModel = async (model, transcript, meetingTitle, duration) => {
+const callSummaryModel = async (modelName, transcript, meetingTitle, duration) => {
   const systemPrompt =
-    'You are an expert meeting analyst. Analyze this meeting transcript and output the summary in valid JSON only.';
+    'You are an expert meeting analyst. Analyze this meeting transcript and output the summary in valid JSON only. Do not wrap in markdown.';
   const userPrompt = `
 Meeting Title: ${meetingTitle}
 Duration: ${duration} minutes
@@ -43,12 +49,17 @@ ${SUMMARY_SCHEMA_HINT}
 Return only the JSON string. No markdown fences.
 `;
 
-  const result = await model.generateContent({
-    contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-    generationConfig: { responseMimeType: 'application/json' },
+  const response = await openai.chat.completions.create({
+    model: modelName,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ],
+    response_format: { type: 'json_object' }
   });
 
-  const parsed = parseModelJson(result.response.text());
+  const rawText = response.choices[0].message.content;
+  const parsed = parseModelJson(rawText);
   return {
     summary: parsed.summary || '',
     keyPoints: Array.isArray(parsed.keyPoints) ? parsed.keyPoints : [],
@@ -108,14 +119,13 @@ const tryModelsInOrder = async (modelNames, fn) => {
     if (tried.has(name)) continue;
     tried.add(name);
     try {
-      const model = getGenerativeModel(name);
-      const result = await fn(model, name);
+      const result = await fn(name);
       if (result !== undefined && result !== null) {
-        logger.info(`Gemini success with model: ${name}`);
+        logger.info(`AI success with model: ${name}`);
         return result;
       }
     } catch (error) {
-      logger.warn(`Gemini model "${name}" failed: ${error.message}`);
+      logger.warn(`AI model "${name}" failed: ${error.message}`);
     }
   }
   return null;
@@ -133,8 +143,8 @@ const generateMeetingSummary = async (transcript, meetingTitle, duration) => {
   }
 
   const allModels = [...PRO_MODEL_CANDIDATES, ...FLASH_MODEL_CANDIDATES];
-  const aiResult = await tryModelsInOrder(allModels, async (model) => {
-    const result = await callSummaryModel(model, transcript, meetingTitle, duration);
+  const aiResult = await tryModelsInOrder(allModels, async (modelName) => {
+    const result = await callSummaryModel(modelName, transcript, meetingTitle, duration);
     if (result.summary?.trim()) {
       return { ...result, isLocalFallback: false };
     }
@@ -145,7 +155,7 @@ const generateMeetingSummary = async (transcript, meetingTitle, duration) => {
     return aiResult;
   }
 
-  logger.warn(`All Gemini summary attempts failed for "${meetingTitle}". Using transcript heuristic.`);
+  logger.warn(`All AI summary attempts failed for "${meetingTitle}". Using transcript heuristic.`);
   return buildHeuristicSummary(transcript, meetingTitle, duration);
 };
 
@@ -174,24 +184,31 @@ Each item must follow this schema:
 Return only the JSON string.
 `;
 
-  const tryExtract = async (model) => {
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-      generationConfig: { responseMimeType: 'application/json' },
+  const tryExtract = async (modelName) => {
+    const response = await openai.chat.completions.create({
+      model: modelName,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
     });
-    const raw = result.response.text();
-    const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    
+    const rawText = response.choices[0].message.content;
+    
+    // Parse the JSON array properly from standard openAI output
+    const cleaned = rawText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
     const start = cleaned.indexOf('[');
     const end = cleaned.lastIndexOf(']');
     if (start === -1 || end === -1) {
       throw new Error('Model response did not contain JSON array');
     }
-    return JSON.parse(cleaned.slice(start, end + 1));
+    const parsed = JSON.parse(cleaned.slice(start, end + 1));
+    return parsed;
   };
 
   const allModels = [...PRO_MODEL_CANDIDATES, ...FLASH_MODEL_CANDIDATES];
-  const items = await tryModelsInOrder(allModels, async (model) => {
-    const parsed = await tryExtract(model);
+  const items = await tryModelsInOrder(allModels, async (modelName) => {
+    const parsed = await tryExtract(modelName);
     return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
   });
 
@@ -199,7 +216,7 @@ Return only the JSON string.
     return items;
   }
 
-  logger.error('Error extracting action items: all Gemini models failed');
+  logger.error('Error extracting action items: all AI models failed');
   return [];
 };
 
@@ -217,13 +234,17 @@ The sum of minutes must match the total duration of ${duration} minutes.
 Return only the JSON string.
 `;
 
-  const agenda = await tryModelsInOrder(FLASH_MODEL_CANDIDATES, async (model) => {
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-      generationConfig: { responseMimeType: 'application/json' },
+  const agenda = await tryModelsInOrder(FLASH_MODEL_CANDIDATES, async (modelName) => {
+    const response = await openai.chat.completions.create({
+      model: modelName,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
     });
-    const responseText = result.response.text();
-    const cleaned = responseText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    
+    const rawText = response.choices[0].message.content;
+    const cleaned = rawText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
     const start = cleaned.indexOf('[');
     const end = cleaned.lastIndexOf(']');
     return JSON.parse(cleaned.slice(start, end + 1));
@@ -253,12 +274,16 @@ Analyze these metrics and provide productivity score (0-100), reasoning, and sug
 Return JSON: { "score": 85, "reasoning": "...", "suggestions": ["..."] }
 `;
 
-  const analysis = await tryModelsInOrder(FLASH_MODEL_CANDIDATES, async (model) => {
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-      generationConfig: { responseMimeType: 'application/json' },
+  const analysis = await tryModelsInOrder(FLASH_MODEL_CANDIDATES, async (modelName) => {
+    const response = await openai.chat.completions.create({
+      model: modelName,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      response_format: { type: 'json_object' }
     });
-    return parseModelJson(result.response.text());
+    return parseModelJson(response.choices[0].message.content);
   });
 
   if (analysis) {
@@ -276,33 +301,8 @@ Return JSON: { "score": 85, "reasoning": "...", "suggestions": ["..."] }
 };
 
 const transcribeAudio = async (audioBuffer, mimeType) => {
-  if (!audioBuffer) {
-    throw new Error('No audio buffer provided');
-  }
-
-  const base64Audio = audioBuffer.toString('base64');
-  const transcript = await tryModelsInOrder(FLASH_MODEL_CANDIDATES, async (model) => {
-    const result = await model.generateContent({
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { inlineData: { data: base64Audio, mimeType } },
-            {
-              text: 'Transcribe this meeting audio accurately. Format as a conversation with speaker turns if distinguishable. Return only the transcript text.',
-            },
-          ],
-        },
-      ],
-    });
-    const text = result.response.text();
-    return text?.trim() ? text : null;
-  });
-
-  if (!transcript) {
-    throw new Error('All Gemini models failed to transcribe audio');
-  }
-  return transcript;
+  logger.warn('Audio transcription not natively supported on OpenRouter text completions endpoint. Returning null.');
+  return null;
 };
 
 const answerMeetingQuestion = async (transcript, question) => {
@@ -323,18 +323,22 @@ Question:
 ${question}
 `;
 
-  const answer = await tryModelsInOrder(FLASH_MODEL_CANDIDATES, async (model) => {
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
+  const answer = await tryModelsInOrder(FLASH_MODEL_CANDIDATES, async (modelName) => {
+    const response = await openai.chat.completions.create({
+      model: modelName,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
     });
-    return result.response.text();
+    return response.choices[0].message.content;
   });
 
   if (answer) {
     return answer.trim();
   }
 
-  logger.error('Error answering meeting question: all Gemini models failed');
+  logger.error('Error answering meeting question: all AI models failed');
   return 'Sorry, I am unable to answer your question at this time. Please try again later.';
 };
 
