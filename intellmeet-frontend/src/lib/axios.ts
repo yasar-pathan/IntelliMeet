@@ -53,6 +53,11 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
+    // Skip 401 interception for login and refresh-token to prevent infinite redirects
+    if (originalRequest.url?.includes('/auth/login') || originalRequest.url?.includes('/auth/refresh-token')) {
+      return Promise.reject(error);
+    }
+
     if (error.response?.status === 401 && !originalRequest._retry) {
       // FormData bodies cannot be replayed — refresh token but do not retry upload
       if (originalRequest?.data instanceof FormData) {
