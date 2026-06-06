@@ -310,10 +310,70 @@ const getProductivityAnalysis = asyncHandler(async (req, res) => {
   );
 });
 
+const MeetingAiChat = require('../models/MeetingAiChat');
+
+/**
+ * @route   POST /api/v1/ai/meeting-chat/:meetingId
+ * @desc    Ask AI a question about the meeting
+ * @access  Private (participant only)
+ */
+const askQuestion = asyncHandler(async (req, res) => {
+  const { meetingId } = req.params;
+  const { question } = req.body;
+  const userId = req.user._id;
+
+  if (!question || question.trim() === '') {
+    throw new ApiError(400, 'Question cannot be empty');
+  }
+
+  const meeting = await assertMeetingParticipant(meetingId, userId);
+
+  let currentTranscript = meeting.transcript || '';
+  if (meeting.status === 'live' || meeting.status === 'scheduled') {
+    const liveTranscript = await redis.get(`transcript:${meetingId}`);
+    if (liveTranscript) currentTranscript = liveTranscript;
+  }
+
+  const answer = await geminiService.answerMeetingQuestion(currentTranscript, question);
+
+  const chatMessage = await MeetingAiChat.create({
+    meeting: meetingId,
+    user: userId,
+    question,
+    answer
+  });
+
+  res.status(200).json(
+    new ApiResponse(200, { answer, chatMessage }, 'Question answered successfully')
+  );
+});
+
+/**
+ * @route   GET /api/v1/ai/meeting-chat/:meetingId
+ * @desc    Get AI chat history for a meeting
+ * @access  Private (participant only)
+ */
+const getChatHistory = asyncHandler(async (req, res) => {
+  const { meetingId } = req.params;
+  const userId = req.user._id;
+
+  await assertMeetingParticipant(meetingId, userId);
+
+  const history = await MeetingAiChat.find({ meeting: meetingId })
+    .sort({ createdAt: 1 })
+    .select('-__v');
+
+  res.status(200).json(
+    new ApiResponse(200, history, 'Chat history fetched successfully')
+  );
+});
+
 module.exports = {
   summarizeMeeting,
   extractActions,
   generateAgenda,
   getProductivityAnalysis,
-  getAiProcessingStatus
+  getAiProcessingStatus,
+  askQuestion,
+  getChatHistory
 };

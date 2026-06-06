@@ -305,6 +305,39 @@ const transcribeAudio = async (audioBuffer, mimeType) => {
   return transcript;
 };
 
+const answerMeetingQuestion = async (transcript, question) => {
+  if (!transcript || transcript.trim() === '') {
+    return 'The requested information was not discussed during this meeting.';
+  }
+
+  const systemPrompt = `You are a meeting assistant.
+Answer questions ONLY using information found in the provided transcript.
+If the answer cannot be found in the transcript, respond:
+"That topic was not discussed during the meeting."`;
+
+  const userPrompt = `
+Transcript:
+${transcript.slice(0, 120000)}
+
+Question:
+${question}
+`;
+
+  const answer = await tryModelsInOrder(FLASH_MODEL_CANDIDATES, async (model) => {
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
+    });
+    return result.response.text();
+  });
+
+  if (answer) {
+    return answer.trim();
+  }
+
+  logger.error('Error answering meeting question: all Gemini models failed');
+  return 'Sorry, I am unable to answer your question at this time. Please try again later.';
+};
+
 module.exports = {
   generateMeetingSummary,
   extractActionItems,
@@ -312,5 +345,6 @@ module.exports = {
   analyzeMeetingProductivity,
   transcribeAudio,
   buildHeuristicSummary,
+  answerMeetingQuestion,
   LOCAL_FALLBACK_MARKER,
 };

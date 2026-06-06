@@ -13,6 +13,7 @@ import { formatDuration } from '@/lib/utils';
 import api from '@/lib/axios';
 import { useAuthStore } from '@/stores/authStore';
 import { DeleteMeetingButton } from '@/features/meetings/components/DeleteMeetingButton';
+import { MeetingAiChat } from '@/features/meetings/components/MeetingAiChat';
 import { getMeetingHostId } from '@/features/meetings/api/meetingsApi';
 import type { ApiResponse } from '@/types/api';
 import type { Meeting } from '@/types/models';
@@ -227,6 +228,7 @@ export const MeetingSummaryPage: React.FC = () => {
         <div className="flex justify-start mb-6">
           <TabsList>
             <TabsTrigger value="summary">AI Notes & Summary</TabsTrigger>
+            <TabsTrigger value="aiChat">AI Assistant Q&A</TabsTrigger>
             {hasRecording && <TabsTrigger value="recording">Recording</TabsTrigger>}
             <TabsTrigger value="actionItems">Action Items</TabsTrigger>
             <TabsTrigger value="transcript">Full Transcript</TabsTrigger>
@@ -277,6 +279,13 @@ export const MeetingSummaryPage: React.FC = () => {
             </Card>
           </TabsContent>
         )}
+
+        {/* Tab: AI Chat */}
+        <TabsContent value="aiChat">
+          <div className="max-w-4xl mx-auto">
+            <MeetingAiChat meetingId={meetingId!} />
+          </div>
+        </TabsContent>
 
         {/* Tab 1: AI Summary & Notes */}
         <TabsContent value="summary">

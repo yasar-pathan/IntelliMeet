@@ -14,5 +14,7 @@ router.post('/extract-actions/:meetingId', aiController.extractActions);
 router.post('/generate-agenda', aiController.generateAgenda);
 router.get('/productivity/:meetingId', aiController.getProductivityAnalysis);
 router.get('/status/:meetingId', aiController.getAiProcessingStatus);
+router.post('/meeting-chat/:meetingId', aiController.askQuestion);
+router.get('/meeting-chat/:meetingId', aiController.getChatHistory);
 
 module.exports = router;
