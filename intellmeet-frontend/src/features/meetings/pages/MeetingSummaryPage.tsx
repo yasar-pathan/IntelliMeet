@@ -114,10 +114,12 @@ export const MeetingSummaryPage: React.FC = () => {
     },
     enabled:
       !!meetingId &&
+      !!meeting?.transcript &&
       activeTab === 'summary' &&
       !meeting?.aiSummary?.summary &&
       !isLocalFallbackStoredSummary(meeting?.aiSummary?.summary) &&
       !regenerateSummaryMutation.isPending,
+    retry: false,
   });
 
   const aiSummary = meeting?.aiSummary || summaryData?.data;

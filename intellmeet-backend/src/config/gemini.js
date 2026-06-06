@@ -11,13 +11,13 @@ const genAI = new GoogleGenerativeAI(apiKey || 'mock_key');
 
 const uniqueList = (items) => [...new Set(items.filter(Boolean))];
 
-/** Ordered fallbacks — Gemini 1.5 names are shut down; try 2.5/2.0 next. */
 const PRO_MODEL_CANDIDATES = uniqueList([
   process.env.GEMINI_MODEL_PRO,
   'gemini-2.5-pro',
   'gemini-2.5-flash',
   'gemini-2.0-flash',
   'gemini-1.5-pro-002',
+  'gemini-1.5-pro-latest',
 ]);
 
 const FLASH_MODEL_CANDIDATES = uniqueList([
@@ -25,6 +25,9 @@ const FLASH_MODEL_CANDIDATES = uniqueList([
   'gemini-2.5-flash',
   'gemini-2.0-flash',
   'gemini-1.5-flash-002',
+  'gemini-1.5-flash',
+  'gemini-1.5-flash-latest',
+  'gemini-pro',
 ]);
 
 const getGenerativeModel = (modelName) => genAI.getGenerativeModel({ model: modelName });
