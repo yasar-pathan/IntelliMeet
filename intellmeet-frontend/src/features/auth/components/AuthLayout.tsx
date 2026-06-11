@@ -1,6 +1,5 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
-import { Brain } from 'lucide-react';
 
 interface AuthLayoutProps {
   children: React.ReactNode;
@@ -21,8 +20,8 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({ children, title, subtitl
         <div className="mx-auto w-full max-w-md rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl p-8 shadow-2xl">
           {/* Brand Logo Header */}
           <div className="text-left mb-8">
-            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-r from-blue-500 to-purple-600 text-white mb-5 shadow-xl">
-              <Brain className="h-7 w-7" />
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl overflow-hidden bg-white/10 mb-5 shadow-xl border border-white/10">
+              <img src="/logo.png" alt="IntellMeet Logo" className="h-full w-full object-cover" />
             </div>
             <h1 className="text-3xl font-bold text-white leading-tight">{title}</h1>
             <p className="text-sm text-slate-400 mt-2 leading-relaxed">{subtitle}</p>

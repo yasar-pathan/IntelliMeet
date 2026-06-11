@@ -66,15 +66,15 @@ export const Sidebar: React.FC = () => {
       <div className="flex items-center justify-between h-16 px-4 border-b border-sidebar-border">
         {!sidebarCollapsed && (
           <div className="flex items-center gap-2">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground font-black text-lg">
-              I
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg overflow-hidden bg-background/50 border border-border/50 shadow-sm">
+              <img src="/logo.png" alt="IntellMeet Logo" className="h-full w-full object-cover" />
             </div>
             <span className="font-bold text-base tracking-tight text-foreground">IntellMeet</span>
           </div>
         )}
         {sidebarCollapsed && (
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground font-black text-lg mx-auto">
-            I
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg overflow-hidden bg-background/50 border border-border/50 shadow-sm mx-auto">
+            <img src="/logo.png" alt="IntellMeet Logo" className="h-full w-full object-cover" />
           </div>
         )}
         {!sidebarCollapsed && (
