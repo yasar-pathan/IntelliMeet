@@ -107,6 +107,30 @@ export const MeetingRoomPage: React.FC = () => {
     createPeerConnection,
     closePeerConnection,
     onReaction: handleReactionReceived,
+    onForceMuteAudio: async () => {
+      const stream = useMeetingStore.getState().localStream;
+      const audioTrack = stream?.getAudioTracks()[0];
+      if (audioTrack && audioTrack.enabled) {
+        audioTrack.enabled = false;
+        setAudioOn(false);
+        socket?.emit('meeting:toggle-audio', { isAudioOn: false });
+      }
+      toast.warning('The host has muted your microphone.');
+    },
+    onForceMuteVideo: async () => {
+      const stream = useMeetingStore.getState().localStream;
+      const videoTrack = stream?.getVideoTracks()[0];
+      if (videoTrack && videoTrack.enabled) {
+        videoTrack.enabled = false;
+        setVideoOn(false);
+        socket?.emit('meeting:toggle-video', { isVideoOn: false });
+      }
+      toast.warning('The host has stopped your camera.');
+    },
+    onForceKick: () => {
+      toast.error('You have been removed from the meeting by the host.');
+      void handleLeaveConfirm();
+    },
   });
 
   const { startTranscript, stopTranscript } = useLiveTranscript(activeMeeting?._id || '');
@@ -360,6 +384,10 @@ export const MeetingRoomPage: React.FC = () => {
             isVideoOn={isVideoOn}
             isAudioOn={isAudioOn}
             isHandRaised={isHandRaised}
+            isHostUser={isHost}
+            onKickParticipant={(socketId) => socket?.emit('meeting:host-kick', { targetSocketId: socketId })}
+            onMuteParticipantAudio={(socketId) => socket?.emit('meeting:host-mute-audio', { targetSocketId: socketId })}
+            onMuteParticipantVideo={(socketId) => socket?.emit('meeting:host-mute-video', { targetSocketId: socketId })}
           />
         )}
 

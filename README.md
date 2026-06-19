@@ -139,6 +139,59 @@ graph TD
 
 ---
 
+## 🌐 Cloud Deployment Architecture
+
+```mermaid
+graph TD
+    classDef client fill:#e1f5fe,stroke:#039be5,stroke-width:2px;
+    classDef aws fill:#fff3e0,stroke:#ff9800,stroke-width:2px;
+    classDef ec2 fill:#efebe9,stroke:#5d4037,stroke-width:2px;
+    classDef external fill:#e8f5e9,stroke:#4caf50,stroke-width:2px;
+
+    subgraph Client ["Client Layer"]
+        Browser["User Browser (React App)"]:::client
+    end
+
+    subgraph AWS ["AWS Cloud Infrastructure"]
+        Amplify["AWS Amplify CDN (Frontend Host)"]:::aws
+        ALB["Application Load Balancer (ALB)"]:::aws
+        
+        subgraph EC2Instance ["EC2 Instance VM"]
+            Backend["Express.js Server (Port 5000)"]:::ec2
+            Redis["Local Redis (Port 6379)"]:::ec2
+        end
+        
+        S3["Amazon S3 Bucket (Recordings)"]:::aws
+    end
+
+    subgraph External ["Managed SaaS / Database Services"]
+        MongoDB["MongoDB Atlas (Persistent Data)"]:::external
+        Gemini["Google Gemini AI (AI Core)"]:::external
+        Cloudinary["Cloudinary CDN (Media CDN)"]:::external
+    end
+
+    %% Connections
+    Browser -->|1. Fetches Static HTML/JS| Amplify
+    Browser -->|2. HTTPS API / WSS WebSockets| ALB
+    ALB -->|3. Routes Traffic on Port 5000| Backend
+    Backend <-->|4. Local Memory Access| Redis
+    Backend <-->|5. CRUD Queries| MongoDB
+    Backend -->|6. AI Prompt & Transcripts| Gemini
+    Backend -->|7. Image Uploads| Cloudinary
+    
+    %% Recording flow
+    Backend -->|8. Generates Presigned URLs| S3
+    Browser -->|9. Direct Upload / Download| S3
+
+    %% Styling Link Colors
+    linkStyle 0,1,2 stroke:#039be5,stroke-width:2px;
+    linkStyle 3 stroke:#5d4037,stroke-width:2px;
+    linkStyle 4,5,6 stroke:#4caf50,stroke-width:2px;
+    linkStyle 7,8 stroke:#ff9800,stroke-width:2px;
+```
+
+---
+
 <div align="center">
   <p>Built with ❤️ for modern engineering teams.</p>
 </div>

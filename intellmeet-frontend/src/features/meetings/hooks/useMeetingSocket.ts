@@ -11,6 +11,9 @@ interface UseMeetingSocketProps {
   createPeerConnection: (socketId: string, isInitiator: boolean) => Promise<RTCPeerConnection>;
   closePeerConnection: (socketId: string) => void;
   onReaction: (reaction: { emoji: string; userId: string; socketId: string }) => void;
+  onForceMuteAudio?: () => void;
+  onForceMuteVideo?: () => void;
+  onForceKick?: () => void;
 }
 
 export function useMeetingSocket({
@@ -19,6 +22,9 @@ export function useMeetingSocket({
   createPeerConnection,
   closePeerConnection,
   onReaction,
+  onForceMuteAudio,
+  onForceMuteVideo,
+  onForceKick,
 }: UseMeetingSocketProps) {
   const socket = useSocket();
   const navigate = useNavigate();
@@ -32,10 +38,16 @@ export function useMeetingSocket({
   const createPeerConnectionRef = React.useRef(createPeerConnection);
   const closePeerConnectionRef = React.useRef(closePeerConnection);
   const onReactionRef = React.useRef(onReaction);
+  const onForceMuteAudioRef = React.useRef(onForceMuteAudio);
+  const onForceMuteVideoRef = React.useRef(onForceMuteVideo);
+  const onForceKickRef = React.useRef(onForceKick);
 
   createPeerConnectionRef.current = createPeerConnection;
   closePeerConnectionRef.current = closePeerConnection;
   onReactionRef.current = onReaction;
+  onForceMuteAudioRef.current = onForceMuteAudio;
+  onForceMuteVideoRef.current = onForceMuteVideo;
+  onForceKickRef.current = onForceKick;
 
   React.useEffect(() => {
     if (!socket || !meetingCode || !isJoined) return;
@@ -109,6 +121,18 @@ export function useMeetingSocket({
       navigate('/meetings');
     };
 
+    const handleForceMuteAudio = () => {
+      onForceMuteAudioRef.current?.();
+    };
+
+    const handleForceMuteVideo = () => {
+      onForceMuteVideoRef.current?.();
+    };
+
+    const handleForceKick = () => {
+      onForceKickRef.current?.();
+    };
+
     socket.on('meeting:participants-list', handleParticipantsList);
     socket.on('meeting:user-joined', handleUserJoined);
     socket.on('meeting:user-left', handleUserLeft);
@@ -122,6 +146,9 @@ export function useMeetingSocket({
     socket.on('meeting:transcript-update', handleTranscriptUpdate);
     socket.on('meeting:ended', handleMeetingEnded);
     socket.on('meeting:cancelled', handleMeetingCancelled);
+    socket.on('meeting:force-mute-audio', handleForceMuteAudio);
+    socket.on('meeting:force-mute-video', handleForceMuteVideo);
+    socket.on('meeting:force-kick', handleForceKick);
 
     return () => {
       console.log(`[Socket] Leaving meeting room: ${meetingCode}`);
@@ -140,6 +167,9 @@ export function useMeetingSocket({
       socket.off('meeting:transcript-update', handleTranscriptUpdate);
       socket.off('meeting:ended', handleMeetingEnded);
       socket.off('meeting:cancelled', handleMeetingCancelled);
+      socket.off('meeting:force-mute-audio', handleForceMuteAudio);
+      socket.off('meeting:force-mute-video', handleForceMuteVideo);
+      socket.off('meeting:force-kick', handleForceKick);
     };
   }, [
     meetingCode,

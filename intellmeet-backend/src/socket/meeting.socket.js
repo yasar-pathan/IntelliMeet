@@ -199,6 +199,64 @@ const registerMeetingHandlers = (io, socket) => {
     });
   });
 
+  // 4b. Host Moderation Controls
+  socket.on('meeting:host-mute-audio', async ({ targetSocketId }) => {
+    const meetingCode = socket.meetingCode;
+    const activeMeetingId = socket.activeMeetingId;
+    if (!meetingCode || !activeMeetingId) return;
+
+    try {
+      const meeting = await Meeting.findById(activeMeetingId).select('host');
+      if (!meeting || meeting.host.toString() !== socket.user._id.toString()) {
+        logger.warn(`Non-host user ${socket.user._id} attempted to mute audio for socket ${targetSocketId}`);
+        return;
+      }
+
+      io.to(targetSocketId).emit('meeting:force-mute-audio');
+      logger.info(`Host ${socket.user._id} force-muted audio for socket ${targetSocketId}`);
+    } catch (err) {
+      logger.error(`Error in host-mute-audio: ${err.message}`);
+    }
+  });
+
+  socket.on('meeting:host-mute-video', async ({ targetSocketId }) => {
+    const meetingCode = socket.meetingCode;
+    const activeMeetingId = socket.activeMeetingId;
+    if (!meetingCode || !activeMeetingId) return;
+
+    try {
+      const meeting = await Meeting.findById(activeMeetingId).select('host');
+      if (!meeting || meeting.host.toString() !== socket.user._id.toString()) {
+        logger.warn(`Non-host user ${socket.user._id} attempted to mute video for socket ${targetSocketId}`);
+        return;
+      }
+
+      io.to(targetSocketId).emit('meeting:force-mute-video');
+      logger.info(`Host ${socket.user._id} force-muted video for socket ${targetSocketId}`);
+    } catch (err) {
+      logger.error(`Error in host-mute-video: ${err.message}`);
+    }
+  });
+
+  socket.on('meeting:host-kick', async ({ targetSocketId }) => {
+    const meetingCode = socket.meetingCode;
+    const activeMeetingId = socket.activeMeetingId;
+    if (!meetingCode || !activeMeetingId) return;
+
+    try {
+      const meeting = await Meeting.findById(activeMeetingId).select('host');
+      if (!meeting || meeting.host.toString() !== socket.user._id.toString()) {
+        logger.warn(`Non-host user ${socket.user._id} attempted to kick socket ${targetSocketId}`);
+        return;
+      }
+
+      io.to(targetSocketId).emit('meeting:force-kick');
+      logger.info(`Host ${socket.user._id} kicked socket ${targetSocketId}`);
+    } catch (err) {
+      logger.error(`Error in host-kick: ${err.message}`);
+    }
+  });
+
   // 5. Screen Share States
   socket.on('meeting:screen-share-start', () => {
     const meetingCode = socket.meetingCode;

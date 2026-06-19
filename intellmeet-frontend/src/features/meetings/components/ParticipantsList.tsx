@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Users, Mic, MicOff, Video, VideoOff, Hand } from 'lucide-react';
+import { Users, Mic, MicOff, Video, VideoOff, Hand, UserMinus } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/ScrollArea';
 import { Avatar } from '@/components/common/Avatar';
 import { useAuthStore } from '@/stores/authStore';
@@ -11,6 +11,10 @@ interface ParticipantsListProps {
   isVideoOn: boolean;
   isAudioOn: boolean;
   isHandRaised: boolean;
+  isHostUser?: boolean;
+  onKickParticipant?: (socketId: string) => void;
+  onMuteParticipantAudio?: (socketId: string) => void;
+  onMuteParticipantVideo?: (socketId: string) => void;
 }
 
 export const ParticipantsList: React.FC<ParticipantsListProps> = ({
@@ -19,6 +23,10 @@ export const ParticipantsList: React.FC<ParticipantsListProps> = ({
   isVideoOn,
   isAudioOn,
   isHandRaised,
+  isHostUser = false,
+  onKickParticipant,
+  onMuteParticipantAudio,
+  onMuteParticipantVideo,
 }) => {
   const { user: currentUser } = useAuthStore();
   const remotePeers = Array.from(participants.values());
@@ -84,9 +92,49 @@ export const ParticipantsList: React.FC<ParticipantsListProps> = ({
                 </div>
               </div>
               <div className="flex items-center gap-1.5 text-muted-foreground flex-shrink-0">
-                {peer.isHandRaised && <Hand className="h-3.5 w-3.5 text-primary animate-bounce" />}
-                {peer.isAudioOn ? <Mic className="h-3.5 w-3.5 text-success" /> : <MicOff className="h-3.5 w-3.5 text-destructive" />}
-                {peer.isVideoOn ? <Video className="h-3.5 w-3.5 text-success" /> : <VideoOff className="h-3.5 w-3.5 text-destructive" />}
+                {peer.isHandRaised && <Hand className="h-3.5 w-3.5 text-primary animate-bounce mr-1" />}
+                {!isHostUser || getMeetingRoleLabel(peer.userId) === 'Host' ? (
+                  <>
+                    {peer.isAudioOn ? <Mic className="h-3.5 w-3.5 text-success" /> : <MicOff className="h-3.5 w-3.5 text-destructive" />}
+                    {peer.isVideoOn ? <Video className="h-3.5 w-3.5 text-success" /> : <VideoOff className="h-3.5 w-3.5 text-destructive" />}
+                  </>
+                ) : (
+                  <div className="flex items-center gap-1">
+                    {peer.isAudioOn ? (
+                      <button
+                        onClick={() => onMuteParticipantAudio?.(peer.socketId)}
+                        className="p-1 rounded hover:bg-destructive/10 text-success hover:text-destructive transition-colors cursor-pointer"
+                        title="Mute Mic"
+                      >
+                        <Mic className="h-3.5 w-3.5" />
+                      </button>
+                    ) : (
+                      <div className="p-1 flex items-center justify-center"><MicOff className="h-3.5 w-3.5 text-destructive" /></div>
+                    )}
+                    {peer.isVideoOn ? (
+                      <button
+                        onClick={() => onMuteParticipantVideo?.(peer.socketId)}
+                        className="p-1 rounded hover:bg-destructive/10 text-success hover:text-destructive transition-colors cursor-pointer"
+                        title="Stop Video"
+                      >
+                        <Video className="h-3.5 w-3.5" />
+                      </button>
+                    ) : (
+                      <div className="p-1 flex items-center justify-center"><VideoOff className="h-3.5 w-3.5 text-destructive" /></div>
+                    )}
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Are you sure you want to remove ${peer.name} from the meeting?`)) {
+                          onKickParticipant?.(peer.socketId);
+                        }
+                      }}
+                      className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+                      title="Kick Participant"
+                    >
+                      <UserMinus className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           ))}
