@@ -1,0 +1,74 @@
+name: Backend CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'intellmeet-backend/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'intellmeet-backend/**'
+
+jobs:
+  test:
+    name: Run Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      mongodb:
+        image: mongo:6.0
+        ports:
+          - 27017:27017
+      redis:
+        image: redis:7.0-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'intellmeet-backend/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: ./intellmeet-backend
+        run: npm ci
+
+      - name: Run backend tests
+        working-directory: ./intellmeet-backend
+        env:
+          NODE_ENV: test
+          MONGODB_URI: mongodb://localhost:27017/intellmeet_test
+          REDIS_URL: redis://localhost:6379
+          ACCESS_TOKEN_SECRET: test_access_token_secret_value_at_least_64_characters_long_for_security
+          REFRESH_TOKEN_SECRET: test_refresh_token_secret_value_at_least_64_characters_long_for_security
+        run: npm test
+
+  build:
+    name: Build Docker Container
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./intellmeet-backend
+          file: ./intellmeet-backend/Dockerfile
+          push: false
+          tags: intellmeet-backend:latest
