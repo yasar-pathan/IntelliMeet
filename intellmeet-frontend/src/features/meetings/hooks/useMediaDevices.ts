@@ -103,23 +103,23 @@ export function useMediaDevices() {
       return videoTrack.enabled;
     }
 
-    if (!useMeetingStore.getState().isVideoOn) {
-      try {
-        const videoOnly = await navigator.mediaDevices.getUserMedia({ video: true });
-        const newTrack = videoOnly.getVideoTracks()[0];
-        if (newTrack) {
-          stream.addTrack(newTrack);
-          const newStream = new MediaStream(stream.getTracks());
-          setLocalStream(newStream);
-          setVideoOn(true);
-          return true;
-        }
-      } catch (error) {
-        console.error('Failed to enable video track:', error);
+    // No video track exists in the current stream.
+    try {
+      const videoOnly = await navigator.mediaDevices.getUserMedia({ video: true });
+      const newTrack = videoOnly.getVideoTracks()[0];
+      if (newTrack) {
+        stream.addTrack(newTrack);
+        const newStream = new MediaStream(stream.getTracks());
+        setLocalStream(newStream);
+        setVideoOn(true);
+        return true;
       }
+    } catch (error) {
+      console.error('Failed to enable video track:', error);
     }
 
-    return useMeetingStore.getState().isVideoOn;
+    setVideoOn(false);
+    return false;
   }, [startMedia, setLocalStream, setVideoOn]);
 
   const toggleAudio = React.useCallback(async (): Promise<boolean> => {
@@ -137,23 +137,23 @@ export function useMediaDevices() {
       return audioTrack.enabled;
     }
 
-    if (!useMeetingStore.getState().isAudioOn) {
-      try {
-        const audioOnly = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const newTrack = audioOnly.getAudioTracks()[0];
-        if (newTrack) {
-          stream.addTrack(newTrack);
-          const newStream = new MediaStream(stream.getTracks());
-          setLocalStream(newStream);
-          setAudioOn(true);
-          return true;
-        }
-      } catch (error) {
-        console.error('Failed to enable audio track:', error);
+    // No audio track exists in the current stream.
+    try {
+      const audioOnly = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const newTrack = audioOnly.getAudioTracks()[0];
+      if (newTrack) {
+        stream.addTrack(newTrack);
+        const newStream = new MediaStream(stream.getTracks());
+        setLocalStream(newStream);
+        setAudioOn(true);
+        return true;
       }
+    } catch (error) {
+      console.error('Failed to enable audio track:', error);
     }
 
-    return useMeetingStore.getState().isAudioOn;
+    setAudioOn(false);
+    return false;
   }, [startMedia, setLocalStream, setAudioOn]);
 
   return {

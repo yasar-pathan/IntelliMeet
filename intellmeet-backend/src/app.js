@@ -25,6 +25,20 @@ if (process.env.NODE_ENV === 'production' && process.env.SENTRY_DSN) {
 
 const app = express();
 
+// Trust proxy if backend is behind a reverse proxy (Nginx, Cloudflare, Load Balancers, etc.)
+// Defaults to trusting the first proxy ('1'), which is standard for deployments.
+const trustProxy = process.env.TRUST_PROXY || '1';
+if (trustProxy === 'true') {
+  app.set('trust proxy', true);
+} else if (trustProxy === 'false') {
+  app.set('trust proxy', false);
+} else if (!isNaN(Number(trustProxy))) {
+  app.set('trust proxy', Number(trustProxy));
+} else {
+  app.set('trust proxy', trustProxy);
+}
+
+
 // 1. Helmet for security headers
 app.use(helmet({
   contentSecurityPolicy: {

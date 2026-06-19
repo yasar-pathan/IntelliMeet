@@ -24,8 +24,8 @@ const passThroughLimiter = (_req, _res, next) => next();
 const isTestEnv = process.env.NODE_ENV === 'test';
 
 const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per window
+  windowMs: parseInt(process.env.RATE_LIMIT_GLOBAL_WINDOW_MS, 10) || 15 * 60 * 1000, // Default: 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_GLOBAL_MAX, 10) || 300, // Default: 300 requests (increased from 100 to handle multi-user/NAT setups)
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   store: createRedisStore('global'),
@@ -34,8 +34,8 @@ const globalLimiter = rateLimit({
 });
 
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // Limit each IP to 10 auth requests per window
+  windowMs: parseInt(process.env.RATE_LIMIT_AUTH_WINDOW_MS, 10) || 15 * 60 * 1000, // Default: 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_AUTH_MAX, 10) || 100, // Default: 100 auth attempts (increased from 10 to support multiple users behind NAT / team testing)
   standardHeaders: true,
   legacyHeaders: false,
   store: createRedisStore('auth'),
@@ -44,8 +44,8 @@ const authLimiter = rateLimit({
 });
 
 const aiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // Limit each IP to 20 AI requests per window
+  windowMs: parseInt(process.env.RATE_LIMIT_AI_WINDOW_MS, 10) || 15 * 60 * 1000, // Default: 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_AI_MAX, 10) || 50, // Default: 50 AI requests (increased from 20)
   standardHeaders: true,
   legacyHeaders: false,
   store: createRedisStore('ai'),
