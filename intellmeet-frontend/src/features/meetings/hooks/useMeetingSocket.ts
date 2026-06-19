@@ -1,4 +1,6 @@
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { useSocket } from '@/hooks/useSocket';
 import { useMeetingStore } from '@/stores/meetingStore';
 import type { ParticipantInfo, TranscriptChunk } from '@/types/models';
@@ -19,6 +21,7 @@ export function useMeetingSocket({
   onReaction,
 }: UseMeetingSocketProps) {
   const socket = useSocket();
+  const navigate = useNavigate();
   const {
     addParticipant,
     removeParticipant,
@@ -92,6 +95,18 @@ export function useMeetingSocket({
       appendTranscript(chunk);
     };
 
+    const handleMeetingEnded = () => {
+      console.log('[Socket] Meeting ended');
+      toast.info('The meeting has ended.');
+      navigate('/meetings');
+    };
+
+    const handleMeetingCancelled = () => {
+      console.log('[Socket] Meeting cancelled');
+      toast.info('The meeting has been cancelled by the host.');
+      navigate('/meetings');
+    };
+
     socket.on('meeting:participants-list', handleParticipantsList);
     socket.on('meeting:user-joined', handleUserJoined);
     socket.on('meeting:user-left', handleUserLeft);
@@ -103,6 +118,8 @@ export function useMeetingSocket({
     socket.on('meeting:hand-lowered', handleHandLowered);
     socket.on('meeting:reaction', handleReaction);
     socket.on('meeting:transcript-update', handleTranscriptUpdate);
+    socket.on('meeting:ended', handleMeetingEnded);
+    socket.on('meeting:cancelled', handleMeetingCancelled);
 
     return () => {
       console.log(`[Socket] Leaving meeting room: ${meetingCode}`);
@@ -119,11 +136,14 @@ export function useMeetingSocket({
       socket.off('meeting:hand-lowered', handleHandLowered);
       socket.off('meeting:reaction', handleReaction);
       socket.off('meeting:transcript-update', handleTranscriptUpdate);
+      socket.off('meeting:ended', handleMeetingEnded);
+      socket.off('meeting:cancelled', handleMeetingCancelled);
     };
   }, [
     meetingCode,
     isJoined,
     socket,
+    navigate,
     addParticipant,
     removeParticipant,
     updateParticipant,

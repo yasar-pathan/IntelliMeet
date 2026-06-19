@@ -79,7 +79,7 @@ const verifyEmail = asyncHandler(async (req, res) => {
   const user = await User.findOne({
     emailVerificationToken: hashedToken,
     emailVerificationExpiry: { $gt: new Date() }
-  });
+  }).select('+emailVerificationToken +emailVerificationExpiry');
 
   if (!user) {
     throw new ApiError(400, 'Invalid or expired verification token');
@@ -115,8 +115,8 @@ const verifyEmail = asyncHandler(async (req, res) => {
 const login = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
 
-  // Find user (explicitly selecting password)
-  const user = await User.findOne({ email }).select('+password');
+  // Find user (explicitly selecting password and refreshTokens)
+  const user = await User.findOne({ email }).select('+password +refreshTokens');
   if (!user || !user.isActive) {
     throw new ApiError(401, 'Invalid email or password');
   }
@@ -216,7 +216,7 @@ const refreshToken = asyncHandler(async (req, res) => {
 const forgotPassword = asyncHandler(async (req, res) => {
   const { email } = req.body;
 
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ email }).select('+passwordResetToken +passwordResetExpiry');
 
   if (user) {
     // Generate token
@@ -259,7 +259,7 @@ const resetPassword = asyncHandler(async (req, res) => {
   const user = await User.findOne({
     passwordResetToken: hashedToken,
     passwordResetExpiry: { $gt: new Date() }
-  }).select('+refreshTokens');
+  }).select('+passwordResetToken +passwordResetExpiry +refreshTokens');
 
   if (!user) {
     throw new ApiError(400, 'Invalid or expired password reset token');

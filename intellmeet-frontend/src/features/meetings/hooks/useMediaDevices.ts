@@ -21,6 +21,13 @@ export function useMediaDevices() {
       const wantVideo = options.video ?? true;
       const wantAudio = options.audio ?? true;
 
+      if (!wantVideo && !wantAudio) {
+        setLocalStream(null);
+        setVideoOn(false);
+        setAudioOn(false);
+        return null;
+      }
+
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: wantVideo,
@@ -85,8 +92,8 @@ export function useMediaDevices() {
     const stream = useMeetingStore.getState().localStream;
 
     if (!stream) {
-      await startMedia({ video: true, audio: useMeetingStore.getState().isAudioOn });
-      return useMeetingStore.getState().isVideoOn;
+      const newStream = await startMedia({ video: true, audio: useMeetingStore.getState().isAudioOn });
+      return newStream ? newStream.getVideoTracks().some(t => t.enabled) : false;
     }
 
     const videoTrack = stream.getVideoTracks()[0];
@@ -102,6 +109,8 @@ export function useMediaDevices() {
         const newTrack = videoOnly.getVideoTracks()[0];
         if (newTrack) {
           stream.addTrack(newTrack);
+          const newStream = new MediaStream(stream.getTracks());
+          setLocalStream(newStream);
           setVideoOn(true);
           return true;
         }
@@ -111,14 +120,14 @@ export function useMediaDevices() {
     }
 
     return useMeetingStore.getState().isVideoOn;
-  }, [startMedia, setVideoOn]);
+  }, [startMedia, setLocalStream, setVideoOn]);
 
   const toggleAudio = React.useCallback(async (): Promise<boolean> => {
     const stream = useMeetingStore.getState().localStream;
 
     if (!stream) {
-      await startMedia({ video: useMeetingStore.getState().isVideoOn, audio: true });
-      return useMeetingStore.getState().isAudioOn;
+      const newStream = await startMedia({ video: useMeetingStore.getState().isVideoOn, audio: true });
+      return newStream ? newStream.getAudioTracks().some(t => t.enabled) : false;
     }
 
     const audioTrack = stream.getAudioTracks()[0];
@@ -128,8 +137,24 @@ export function useMediaDevices() {
       return audioTrack.enabled;
     }
 
+    if (!useMeetingStore.getState().isAudioOn) {
+      try {
+        const audioOnly = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const newTrack = audioOnly.getAudioTracks()[0];
+        if (newTrack) {
+          stream.addTrack(newTrack);
+          const newStream = new MediaStream(stream.getTracks());
+          setLocalStream(newStream);
+          setAudioOn(true);
+          return true;
+        }
+      } catch (error) {
+        console.error('Failed to enable audio track:', error);
+      }
+    }
+
     return useMeetingStore.getState().isAudioOn;
-  }, [startMedia, setAudioOn]);
+  }, [startMedia, setLocalStream, setAudioOn]);
 
   return {
     localStream,

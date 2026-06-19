@@ -211,13 +211,58 @@ const registerMeetingHandlers = (io, socket) => {
   });
 
   // Cleanup on connection loss
-  socket.on('disconnecting', () => {
+  socket.on('disconnecting', async () => {
     const meetingCode = socket.meetingCode;
-    if (meetingCode) {
-      socket.to(`meeting:${meetingCode}`).emit('meeting:user-left', {
-        socketId: socket.id,
-        userId: socket.user._id
-      });
+    const activeMeetingId = socket.activeMeetingId;
+    const userId = socket.user?._id;
+
+    if (meetingCode && activeMeetingId && userId) {
+      try {
+        const meeting = await Meeting.findById(activeMeetingId);
+        if (meeting) {
+          const partIdx = meeting.participants.findIndex(
+            (p) => p.user.toString() === userId.toString() && !p.leftAt
+          );
+          if (partIdx !== -1) {
+            meeting.participants[partIdx].leftAt = new Date();
+          }
+
+          const activeParticipants = meeting.participants.filter((p) => !p.leftAt);
+          const isHost = meeting.host.toString() === userId.toString();
+
+          if (isHost || activeParticipants.length === 0) {
+            meeting.status = 'ended';
+            meeting.endedAt = new Date();
+            const start = meeting.startedAt || meeting.createdAt;
+            const end = meeting.endedAt;
+            const diffMs = Math.abs(end - start);
+            meeting.duration = Math.round(diffMs / (1000 * 60));
+          }
+
+          await meeting.save();
+
+          if (meeting.status === 'ended') {
+            io.to(`meeting:${meetingCode}`).emit('meeting:ended');
+
+            // Trigger Redis transcript flushing + Async AI summarization
+            try {
+              const meetingService = require('../services/meeting.service');
+              const aiProcessingService = require('../services/aiProcessing.service');
+              await meetingService.flushTranscriptToMongo(activeMeetingId);
+              await aiProcessingService.queueMeetingIntelligence(activeMeetingId);
+            } catch (err) {
+              logger.error(`Error in socket disconnecting AI trigger: ${err.message}`);
+            }
+          } else {
+            socket.to(`meeting:${meetingCode}`).emit('meeting:user-left', {
+              socketId: socket.id,
+              userId: userId
+            });
+          }
+        }
+      } catch (err) {
+        logger.error(`Error in socket disconnecting handler: ${err.message}`);
+      }
     }
   });
 };

@@ -437,21 +437,11 @@ const leaveMeeting = asyncHandler(async (req, res) => {
   // Record leaving timestamp
   meeting.participants[partIdx].leftAt = new Date();
 
-  // If host leaves and other active participants remain, we could assign co-host roles
   const activeParticipants = meeting.participants.filter(p => !p.leftAt);
   const isHost = meeting.host.toString() === userId.toString();
 
-  if (isHost && activeParticipants.length > 0) {
-    // Make the first active participant a co-host
-    const firstActive = activeParticipants[0];
-    const userToAssignIdx = meeting.participants.findIndex(p => p.user.toString() === firstActive.user.toString());
-    if (userToAssignIdx !== -1) {
-      meeting.participants[userToAssignIdx].role = 'co-host';
-    }
-  }
-
-  // Check if this was the last active participant
-  if (activeParticipants.length === 0) {
+  // Check if the host is leaving OR this was the last active participant
+  if (isHost || activeParticipants.length === 0) {
     meeting.status = 'ended';
     meeting.endedAt = new Date();
     
@@ -465,12 +455,16 @@ const leaveMeeting = asyncHandler(async (req, res) => {
   await meeting.save();
   await invalidateMeetingCaches(userId, meetingId);
 
-  // Emit socket leave event
+  // Emit socket events
   try {
     const io = getIO();
-    io.to(`meeting:${meeting.meetingCode}`).emit('meeting:participant-left', { userId });
+    if (meeting.status === 'ended') {
+      io.to(`meeting:${meeting.meetingCode}`).emit('meeting:ended');
+    } else {
+      io.to(`meeting:${meeting.meetingCode}`).emit('meeting:participant-left', { userId });
+    }
   } catch (sockErr) {
-    logger.debug(`Socket leave broadcast skipped: ${sockErr.message}`);
+    logger.debug(`Socket leave/ended broadcast skipped: ${sockErr.message}`);
   }
 
   // If meeting transitioned to ended, trigger Redis transcript flushing + Async AI summarization
