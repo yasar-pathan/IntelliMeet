@@ -15,7 +15,7 @@ interface PreJoinLobbyProps {
   userName: string;
   userAvatar?: string;
   isHost?: boolean;
-  onJoin: (choices: PreJoinChoices) => void;
+  onJoin: (choices: PreJoinChoices, stream: MediaStream | null) => void;
   onCancel: () => void;
   isJoining?: boolean;
 }
@@ -117,10 +117,10 @@ export const PreJoinLobby: React.FC<PreJoinLobbyProps> = ({
   };
 
   const handleJoin = () => {
-    previewStreamRef.current?.getTracks().forEach((t) => t.stop());
+    const activeStream = previewStream;
     previewStreamRef.current = null;
     setPreviewStream(null);
-    onJoin({ video: videoOn, audio: audioOn });
+    onJoin({ video: videoOn, audio: audioOn }, activeStream);
   };
 
   return (

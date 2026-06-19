@@ -42,7 +42,9 @@ export function useMeetingSocket({
 
     console.log(`[Socket] Joining meeting room: ${meetingCode}`);
 
-    socket.emit('meeting:join-room', { meetingCode });
+    const isVideoOn = useMeetingStore.getState().isVideoOn;
+    const isAudioOn = useMeetingStore.getState().isAudioOn;
+    socket.emit('meeting:join-room', { meetingCode, isVideoOn, isAudioOn });
 
     const handleParticipantsList = (list: ParticipantInfo[]) => {
       console.log('[Socket] Received participants list:', list.length);

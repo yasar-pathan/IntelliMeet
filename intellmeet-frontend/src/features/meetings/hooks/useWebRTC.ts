@@ -92,11 +92,17 @@ export function useWebRTC(
 
       // Hook up remote track listener
       pc.ontrack = (event) => {
-        console.log(`[WebRTC] Received remote track from ${socketId}`);
-        const remoteStream = event.streams[0];
-        if (remoteStream) {
-          updateParticipant(socketId, { stream: remoteStream });
+        console.log(`[WebRTC] Received remote track from ${socketId} (${event.track.kind})`);
+        let remoteStream = event.streams[0];
+        if (!remoteStream) {
+          const participant = useMeetingStore.getState().participants.get(socketId);
+          remoteStream = participant?.stream || new MediaStream();
+          remoteStream.addTrack(event.track);
         }
+
+        // Force a new MediaStream instance to trigger React and VideoTile playout updates
+        const newStream = new MediaStream(remoteStream.getTracks());
+        updateParticipant(socketId, { stream: newStream });
       };
 
       // Negotiate if initiator

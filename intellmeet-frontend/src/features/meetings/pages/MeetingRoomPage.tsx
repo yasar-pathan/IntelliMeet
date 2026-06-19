@@ -49,11 +49,14 @@ export const MeetingRoomPage: React.FC = () => {
     toggleParticipantsPanel,
     toggleTranscript,
     reset: resetMeetingStore,
+    setLocalStream,
+    setVideoOn,
+    setAudioOn,
   } = useMeetingStore();
 
   const [turnCreds, setTurnCreds] = React.useState<TurnCredentials | null>(null);
   const [showPasswordModal, setShowPasswordModal] = React.useState(false);
-  const [pendingJoinChoices, setPendingJoinChoices] = React.useState<PreJoinChoices | null>(null);
+  const [pendingJoinChoices, setPendingJoinChoices] = React.useState<(PreJoinChoices & { stream?: MediaStream | null }) | null>(null);
   const [showLeaveModal, setShowLeaveModal] = React.useState(false);
   const [isHandRaised, setIsHandRaised] = React.useState(false);
   const [reactions, setReactions] = React.useState<FloatingReaction[]>([]);
@@ -126,15 +129,17 @@ export const MeetingRoomPage: React.FC = () => {
     mutationFn: async ({
       password,
       media,
+      stream,
     }: {
       password?: string;
       media: PreJoinChoices;
+      stream?: MediaStream | null;
     }) => {
       const response = await api.post<ApiResponse<{ meeting: Meeting; turnCredentials: TurnCredentials }>>(
         `/meetings/${meeting?._id}/join`,
         { password }
       );
-      return { ...response.data.data, media };
+      return { ...response.data.data, media, stream };
     },
     onSuccess: async (data) => {
       joinedMeetingRef.current = data.meeting;
@@ -143,7 +148,13 @@ export const MeetingRoomPage: React.FC = () => {
       setShowPasswordModal(false);
       setPendingJoinChoices(null);
 
-      await startMedia({ video: data.media.video, audio: data.media.audio });
+      if (data.stream) {
+        setLocalStream(data.stream);
+        setVideoOn(data.media.video && data.stream.getVideoTracks().some((t) => t.enabled));
+        setAudioOn(data.media.audio && data.stream.getAudioTracks().some((t) => t.enabled));
+      } else {
+        await startMedia({ video: data.media.video, audio: data.media.audio });
+      }
     },
     onError: (err: unknown) => {
       const message =
@@ -171,17 +182,17 @@ export const MeetingRoomPage: React.FC = () => {
   const handlePasswordSubmit = (password: string) => {
     setShowPasswordModal(false);
     const choices = pendingJoinChoices ?? { video: true, audio: true };
-    joinMeetingMutation.mutate({ password, media: choices });
+    joinMeetingMutation.mutate({ password, media: choices, stream: pendingJoinChoices?.stream });
     setPendingJoinChoices(null);
   };
 
-  const handlePreJoin = (choices: PreJoinChoices) => {
+  const handlePreJoin = (choices: PreJoinChoices, stream: MediaStream | null) => {
     if (meeting?.isPasswordProtected && !isHost) {
-      setPendingJoinChoices(choices);
+      setPendingJoinChoices({ ...choices, stream });
       setShowPasswordModal(true);
       return;
     }
-    joinMeetingMutation.mutate({ media: choices });
+    joinMeetingMutation.mutate({ media: choices, stream });
   };
 
   const handleToggleCam = async () => {

@@ -6,7 +6,7 @@ const logger = require('../utils/logger');
 const registerMeetingHandlers = (io, socket) => {
   
   // 1. Join Meeting Room
-  socket.on('meeting:join-room', async ({ meetingCode }) => {
+  socket.on('meeting:join-room', async ({ meetingCode, isVideoOn, isAudioOn }) => {
     if (!meetingCode) return;
 
     try {
@@ -32,13 +32,17 @@ const registerMeetingHandlers = (io, socket) => {
       // Track meeting context on socket object
       socket.meetingCode = meetingCode;
       socket.activeMeetingId = meeting._id.toString();
+      socket.isVideoOn = isVideoOn;
+      socket.isAudioOn = isAudioOn;
 
       const user = await User.findById(socket.user._id, 'name avatar');
       const userInfo = {
         socketId: socket.id,
         userId: socket.user._id,
         name: user ? user.name : 'Unknown User',
-        avatar: user ? user.avatar : ''
+        avatar: user ? user.avatar : '',
+        isVideoOn: isVideoOn || false,
+        isAudioOn: isAudioOn || false
       };
 
       // Broadcast join event to all other peers in the room
@@ -53,9 +57,10 @@ const registerMeetingHandlers = (io, socket) => {
           currentParticipants.push({
             socketId: s.id,
             userId: s.user._id,
-            // Fallback if name/avatar is not stored on socket.user (standard Mongoose lookup or client parameters)
             name: s.user.name || 'Participant',
-            avatar: s.user.avatar || ''
+            avatar: s.user.avatar || '',
+            isVideoOn: s.isVideoOn !== undefined ? s.isVideoOn : false,
+            isAudioOn: s.isAudioOn !== undefined ? s.isAudioOn : false
           });
         }
       }
@@ -68,22 +73,85 @@ const registerMeetingHandlers = (io, socket) => {
     }
   });
 
-  // 2. Leave Meeting Room
-  socket.on('meeting:leave-room', () => {
+  // Unified helper for user leaving the meeting room (clean exit or disconnect)
+  const handleLeaveMeeting = async () => {
     const meetingCode = socket.meetingCode;
-    if (!meetingCode) return;
+    const activeMeetingId = socket.activeMeetingId;
+    const userId = socket.user?._id;
+
+    if (!meetingCode || !activeMeetingId || !userId) return;
 
     const roomName = `meeting:${meetingCode}`;
-    socket.leave(roomName);
+    
+    // Clear context immediately to prevent duplicate runs
     socket.meetingCode = null;
     socket.activeMeetingId = null;
 
-    // Broadcast departure
-    socket.to(roomName).emit('meeting:user-left', {
-      socketId: socket.id,
-      userId: socket.user._id
-    });
-    logger.info(`User ${socket.user._id} left meeting room ${roomName}`);
+    try {
+      socket.leave(roomName);
+
+      const meeting = await Meeting.findById(activeMeetingId);
+      if (meeting) {
+        const partIdx = meeting.participants.findIndex(
+          (p) => p.user.toString() === userId.toString() && !p.leftAt
+        );
+        if (partIdx !== -1) {
+          meeting.participants[partIdx].leftAt = new Date();
+        }
+
+        const activeParticipants = meeting.participants.filter((p) => !p.leftAt);
+        const isHost = meeting.host.toString() === userId.toString();
+
+        if (isHost || activeParticipants.length === 0) {
+          meeting.status = 'ended';
+          meeting.endedAt = new Date();
+          const start = meeting.startedAt || meeting.createdAt;
+          const end = meeting.endedAt;
+          const diffMs = Math.abs(end - start);
+          meeting.duration = Math.round(diffMs / (1000 * 60));
+        }
+
+        await meeting.save();
+
+        // Invalidate cache
+        try {
+          const keys = await redis.keys(`meetings:${userId}:*`);
+          if (keys.length > 0) {
+            await redis.del(...keys);
+          }
+          await redis.del(`meeting:details:${activeMeetingId}`);
+        } catch (cacheErr) {
+          logger.error(`Error invalidating cache in handleLeaveMeeting: ${cacheErr.message}`);
+        }
+
+        if (meeting.status === 'ended') {
+          io.to(roomName).emit('meeting:ended');
+
+          // Trigger Redis transcript flushing + Async AI summarization
+          try {
+            const meetingService = require('../services/meeting.service');
+            const aiProcessingService = require('../services/aiProcessing.service');
+            await meetingService.flushTranscriptToMongo(activeMeetingId);
+            await aiProcessingService.queueMeetingIntelligence(activeMeetingId);
+          } catch (err) {
+            logger.error(`Error in socket leave AI trigger: ${err.message}`);
+          }
+        } else {
+          socket.to(roomName).emit('meeting:user-left', {
+            socketId: socket.id,
+            userId: userId
+          });
+        }
+        logger.info(`User ${userId} left meeting room ${roomName}`);
+      }
+    } catch (err) {
+      logger.error(`Error in handleLeaveMeeting: ${err.message}`);
+    }
+  };
+
+  // 2. Leave Meeting Room
+  socket.on('meeting:leave-room', async () => {
+    await handleLeaveMeeting();
   });
 
   // 3. WebRTC Signaling Relays (Offer, Answer, ICE Candidates)
@@ -112,6 +180,7 @@ const registerMeetingHandlers = (io, socket) => {
   socket.on('meeting:toggle-video', ({ isVideoOn }) => {
     const meetingCode = socket.meetingCode;
     if (!meetingCode) return;
+    socket.isVideoOn = isVideoOn;
     socket.to(`meeting:${meetingCode}`).emit('meeting:video-toggled', {
       socketId: socket.id,
       userId: socket.user._id,
@@ -122,6 +191,7 @@ const registerMeetingHandlers = (io, socket) => {
   socket.on('meeting:toggle-audio', ({ isAudioOn }) => {
     const meetingCode = socket.meetingCode;
     if (!meetingCode) return;
+    socket.isAudioOn = isAudioOn;
     socket.to(`meeting:${meetingCode}`).emit('meeting:audio-toggled', {
       socketId: socket.id,
       userId: socket.user._id,
@@ -212,58 +282,7 @@ const registerMeetingHandlers = (io, socket) => {
 
   // Cleanup on connection loss
   socket.on('disconnecting', async () => {
-    const meetingCode = socket.meetingCode;
-    const activeMeetingId = socket.activeMeetingId;
-    const userId = socket.user?._id;
-
-    if (meetingCode && activeMeetingId && userId) {
-      try {
-        const meeting = await Meeting.findById(activeMeetingId);
-        if (meeting) {
-          const partIdx = meeting.participants.findIndex(
-            (p) => p.user.toString() === userId.toString() && !p.leftAt
-          );
-          if (partIdx !== -1) {
-            meeting.participants[partIdx].leftAt = new Date();
-          }
-
-          const activeParticipants = meeting.participants.filter((p) => !p.leftAt);
-          const isHost = meeting.host.toString() === userId.toString();
-
-          if (isHost || activeParticipants.length === 0) {
-            meeting.status = 'ended';
-            meeting.endedAt = new Date();
-            const start = meeting.startedAt || meeting.createdAt;
-            const end = meeting.endedAt;
-            const diffMs = Math.abs(end - start);
-            meeting.duration = Math.round(diffMs / (1000 * 60));
-          }
-
-          await meeting.save();
-
-          if (meeting.status === 'ended') {
-            io.to(`meeting:${meetingCode}`).emit('meeting:ended');
-
-            // Trigger Redis transcript flushing + Async AI summarization
-            try {
-              const meetingService = require('../services/meeting.service');
-              const aiProcessingService = require('../services/aiProcessing.service');
-              await meetingService.flushTranscriptToMongo(activeMeetingId);
-              await aiProcessingService.queueMeetingIntelligence(activeMeetingId);
-            } catch (err) {
-              logger.error(`Error in socket disconnecting AI trigger: ${err.message}`);
-            }
-          } else {
-            socket.to(`meeting:${meetingCode}`).emit('meeting:user-left', {
-              socketId: socket.id,
-              userId: userId
-            });
-          }
-        }
-      } catch (err) {
-        logger.error(`Error in socket disconnecting handler: ${err.message}`);
-      }
-    }
+    await handleLeaveMeeting();
   });
 };
 
