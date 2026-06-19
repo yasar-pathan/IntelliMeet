@@ -61,32 +61,9 @@ jobs:
           REFRESH_TOKEN_SECRET: test_refresh_token_secret_value_at_least_64_characters_long_for_security
         run: npm test
 
-  build:
-    name: Build Docker Container
-    needs: test
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./intellmeet-backend
-          file: ./intellmeet-backend/Dockerfile
-          push: false
-          tags: intellmeet-backend:latest
-
   deploy:
-    name: Deploy to AWS EC2
-    needs: build
+    name: Deploy to AWS EC2 via PM2
+    needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
@@ -106,16 +83,12 @@ jobs:
             git reset --hard HEAD
             git pull origin main
             
-            # Detect configuration and run the correct server process
-            if [ -f "docker-compose.yml" ]; then
-              echo "--- Deploying via Docker Compose ---"
-              docker compose down
-              docker compose up -d --build
-              docker system prune -f
-            else
-              echo "--- Deploying via PM2 ---"
-              npm install --only=production
-              pm2 restart server.js || pm2 start server.js --name intellimeet-api
-            fi
+            # Clean install production dependencies with legacy peer deps
+            echo "--- Installing Production Dependencies ---"
+            npm install --only=production --legacy-peer-deps
+            
+            # Restart the Node server process via PM2
+            echo "--- Restarting PM2 process ---"
+            pm2 restart server.js || pm2 start server.js --name intellimeet-api
             
             echo "--- Deployment Complete! ---"
