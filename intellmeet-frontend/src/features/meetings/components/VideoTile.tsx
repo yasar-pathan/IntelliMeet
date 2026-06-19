@@ -34,12 +34,15 @@ export const VideoTile: React.FC<VideoTileProps> = ({
     const el = videoRef.current;
     if (!el) return;
 
-    if (!showVideo || !stream) {
+    if (!stream) {
       el.srcObject = null;
       return;
     }
 
-    el.srcObject = stream;
+    if (el.srcObject !== stream) {
+      el.srcObject = stream;
+    }
+
     void el.play().catch(() => {
       /* autoplay policies or track pause */
     });
@@ -49,7 +52,7 @@ export const VideoTile: React.FC<VideoTileProps> = ({
         el.srcObject = null;
       }
     };
-  }, [stream, showVideo]);
+  }, [stream]);
 
   return (
     <div className="relative w-full h-full rounded-xl overflow-hidden bg-muted border border-border/40 shadow-sm flex items-center justify-center min-h-[180px] group aspect-video">
