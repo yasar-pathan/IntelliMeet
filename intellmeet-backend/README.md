@@ -1,5 +1,5 @@
 # 🧠 IntellMeet — AI-Powered Enterprise Meeting & Collaboration Platform Backend
-<!-- Triggering CI/CD Workflow Test 4 -->
+<!-- Triggering CI/CD Workflow Test 5 -->
 
 IntellMeet is a secure, enterprise-grade, real-time collaboration server. It features an advanced WebRTC signaling server, rich instant messaging, Kanban-based task allocation, workspace organization, push notifications, and AI analysis powered by Google Gemini (providing summaries, agenda predictions, productivity metrics, and multimodal audio transcribing).
 

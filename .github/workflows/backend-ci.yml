@@ -76,8 +76,19 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           script: |
-            # Navigate to the backend application folder on EC2
-            cd ~/IntelliMeet/intellmeet-backend || cd ~/intellmeet-backend || exit 1
+            # Dynamically locate the backend application directory on the server
+            BACKEND_DIR=$(find ~ -maxdepth 3 -type d -name "intellmeet-backend" 2>/dev/null | head -n 1)
+            if [ -z "$BACKEND_DIR" ]; then
+              BACKEND_DIR=$(find /var/www -maxdepth 3 -type d -name "intellmeet-backend" 2>/dev/null | head -n 1)
+            fi
+            
+            if [ -z "$BACKEND_DIR" ]; then
+              echo "Error: Could not locate 'intellmeet-backend' directory on the server."
+              exit 1
+            fi
+            
+            echo "--- Navigating to: $BACKEND_DIR ---"
+            cd "$BACKEND_DIR" || exit 1
             
             # Reset local changes and pull the latest code from main
             git reset --hard HEAD
