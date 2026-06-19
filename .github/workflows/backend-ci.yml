@@ -49,7 +49,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./intellmeet-backend
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Run backend tests
         working-directory: ./intellmeet-backend
