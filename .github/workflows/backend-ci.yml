@@ -72,3 +72,39 @@ jobs:
           file: ./intellmeet-backend/Dockerfile
           push: false
           tags: intellmeet-backend:latest
+
+  deploy:
+    name: Deploy to AWS EC2
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            # Navigate to the backend application folder on EC2
+            cd ~/IntelliMeet/intellmeet-backend || cd ~/intellmeet-backend || exit 1
+            
+            # Reset local changes and pull the latest code from main
+            git reset --hard HEAD
+            git pull origin main
+            
+            # Detect configuration and run the correct server process
+            if [ -f "docker-compose.yml" ]; then
+              echo "--- Deploying via Docker Compose ---"
+              docker compose down
+              docker compose up -d --build
+              docker system prune -f
+            else
+              echo "--- Deploying via PM2 ---"
+              npm install --only=production
+              pm2 restart server.js || pm2 start server.js --name intellimeet-api
+            fi
+            
+            echo "--- Deployment Complete! ---"
