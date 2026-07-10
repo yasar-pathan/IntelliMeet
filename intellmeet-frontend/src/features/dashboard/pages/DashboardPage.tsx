@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
+import { Switch } from '@/components/ui/Switch';
 import api from '@/lib/axios';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -34,6 +35,7 @@ export const DashboardPage: React.FC = () => {
   // Form states
   const [meetingTitle, setMeetingTitle] = React.useState('');
   const [meetingPass, setMeetingPass] = React.useState('');
+  const [waitingRoom, setWaitingRoom] = React.useState(false);
   const [joinCode, setJoinCode] = React.useState('');
   const [taskTitle, setTaskTitle] = React.useState('');
   const [teamName, setTeamName] = React.useState('');
@@ -55,6 +57,9 @@ export const DashboardPage: React.FC = () => {
       const payload: any = {
         title: meetingTitle,
         isPasswordProtected: !!meetingPass,
+        settings: {
+          waitingRoom,
+        },
       };
       
       if (meetingPass) {
@@ -66,6 +71,7 @@ export const DashboardPage: React.FC = () => {
       setNewMeetingOpen(false);
       setMeetingTitle('');
       setMeetingPass('');
+      setWaitingRoom(false);
       // Navigate to the live meeting room
       navigate(`/meeting/${response.data.data.meetingCode}`);
       await invalidateDashboardStats(queryClient);
@@ -192,6 +198,21 @@ export const DashboardPage: React.FC = () => {
                   placeholder="Set code room password"
                   value={meetingPass}
                   onChange={(e) => setMeetingPass(e.target.value)}
+                />
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-lg border border-border/40 bg-muted/20">
+                <div>
+                  <Label htmlFor="waitingRoom" className="text-sm font-bold text-foreground">
+                    Ask permission to join
+                  </Label>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Require guest permission approval before entry is allowed.
+                  </p>
+                </div>
+                <Switch
+                  id="waitingRoom"
+                  checked={waitingRoom}
+                  onCheckedChange={setWaitingRoom}
                 />
               </div>
             </div>
