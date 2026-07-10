@@ -63,6 +63,25 @@ export const MeetingRoomPage: React.FC = () => {
   const [joining, setJoining] = React.useState(false);
   const joinedMeetingRef = React.useRef<Meeting | null>(null);
 
+  const [isPendingApproval, setIsPendingApproval] = React.useState(false);
+  const [approvedMediaChoices, setApprovedMediaChoices] = React.useState<PreJoinChoices | null>(null);
+  const [approvedStream, setApprovedStream] = React.useState<MediaStream | null>(null);
+  const [entryRequests, setEntryRequests] = React.useState<Array<{ socketId: string; userId: string; name: string; avatar?: string }>>([]);
+
+  const handleApproveEntry = (targetSocketId: string, targetUserId: string) => {
+    if (socket) {
+      socket.emit('meeting:approve-entry', { targetSocketId, targetUserId });
+      setEntryRequests((prev) => prev.filter(r => r.socketId !== targetSocketId));
+    }
+  };
+
+  const handleDenyEntry = (targetSocketId: string, targetUserId: string) => {
+    if (socket) {
+      socket.emit('meeting:deny-entry', { targetSocketId, targetUserId });
+      setEntryRequests((prev) => prev.filter(r => r.socketId !== targetSocketId));
+    }
+  };
+
   const { data: meetingData, isLoading: fetchLoading, error: fetchError } = useQuery<ApiResponse<Meeting>>({
     queryKey: ['meeting', 'code', meetingCode],
     queryFn: async () => {
@@ -159,13 +178,22 @@ export const MeetingRoomPage: React.FC = () => {
       media: PreJoinChoices;
       stream?: MediaStream | null;
     }) => {
-      const response = await api.post<ApiResponse<{ meeting: Meeting; turnCredentials: TurnCredentials }>>(
+      const response = await api.post<ApiResponse<{ meeting: Meeting; turnCredentials: TurnCredentials; approved?: boolean }>>(
         `/meetings/${meeting?._id}/join`,
         { password }
       );
       return { ...response.data.data, media, stream };
     },
     onSuccess: async (data) => {
+      if (data.approved === false) {
+        setIsPendingApproval(true);
+        setApprovedMediaChoices(data.media);
+        setApprovedStream(data.stream || null);
+        setShowPasswordModal(false);
+        setPendingJoinChoices(null);
+        return;
+      }
+
       joinedMeetingRef.current = data.meeting;
       setTurnCreds(data.turnCredentials);
       setActiveMeeting(data.meeting);
@@ -200,6 +228,66 @@ export const MeetingRoomPage: React.FC = () => {
       navigate('/meetings');
     }
   }, [fetchError, navigate]);
+
+  // Guest side: Request entry when waiting room is active
+  React.useEffect(() => {
+    if (!socket || !isPendingApproval || !meetingCode) return;
+
+    console.log('[Socket] Requesting entry for guest:', meetingCode);
+    socket.emit('meeting:request-entry', { meetingCode });
+
+    const handleEntryApproved = async (data: { meeting: Meeting; turnCredentials: TurnCredentials }) => {
+      toast.success('Your request to join was approved!');
+      setIsPendingApproval(false);
+
+      joinedMeetingRef.current = data.meeting;
+      setTurnCreds(data.turnCredentials);
+      setActiveMeeting(data.meeting);
+
+      const media = approvedMediaChoices || { video: true, audio: true };
+      const stream = approvedStream;
+      if (stream) {
+        setLocalStream(stream);
+        setVideoOn(media.video && stream.getVideoTracks().some((t) => t.enabled));
+        setAudioOn(media.audio && stream.getAudioTracks().some((t) => t.enabled));
+      } else {
+        await startMedia({ video: media.video, audio: media.audio });
+      }
+    };
+
+    const handleEntryDenied = (data: { message?: string }) => {
+      toast.error(data.message || 'Your request to join was denied.');
+      setIsPendingApproval(false);
+      navigate('/meetings');
+    };
+
+    socket.on('meeting:entry-approved', handleEntryApproved);
+    socket.on('meeting:entry-denied', handleEntryDenied);
+
+    return () => {
+      socket.off('meeting:entry-approved', handleEntryApproved);
+      socket.off('meeting:entry-denied', handleEntryDenied);
+    };
+  }, [socket, isPendingApproval, meetingCode, navigate, setActiveMeeting, approvedMediaChoices, approvedStream, startMedia, setLocalStream, setVideoOn, setAudioOn]);
+
+  // Host side: Listen for incoming guest requests
+  React.useEffect(() => {
+    if (!socket || !isHost || !activeMeeting) return;
+
+    const handleEntryRequest = (req: { socketId: string; userId: string; name: string; avatar?: string }) => {
+      setEntryRequests((prev) => {
+        if (prev.some(r => r.userId === req.userId)) return prev;
+        return [...prev, req];
+      });
+      toast.info(`${req.name} requested to join the meeting.`);
+    };
+
+    socket.on('meeting:entry-request', handleEntryRequest);
+
+    return () => {
+      socket.off('meeting:entry-request', handleEntryRequest);
+    };
+  }, [socket, isHost, activeMeeting]);
 
   const canShowPreJoin = Boolean(meeting) && !activeMeeting && !turnCreds;
 
@@ -334,6 +422,25 @@ export const MeetingRoomPage: React.FC = () => {
     );
   }
 
+  if (isPendingApproval) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground select-none animate-in fade-in duration-300">
+        <div className="p-8 max-w-md w-full text-center space-y-6 bg-card border border-border/60 rounded-2xl shadow-xl">
+          <div className="w-16 h-16 bg-primary/10 text-primary rounded-full flex items-center justify-center mx-auto">
+            <LoadingSpinner size="lg" />
+          </div>
+          <h2 className="text-xl font-bold text-foreground">Waiting for host approval...</h2>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            The host has been notified of your request to join. You'll enter the meeting automatically once they admit you.
+          </p>
+          <Button onClick={() => handleLeaveConfirm()} variant="outline" className="w-full">
+            Cancel & Exit
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   if (!activeMeeting && joinMeetingMutation.isPending) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground">
@@ -430,6 +537,41 @@ export const MeetingRoomPage: React.FC = () => {
         confirmText="Leave Room"
         isLoading={joining}
       />
+
+      {isHost && entryRequests.length > 0 && (
+        <div className="absolute top-16 left-1/2 transform -translate-x-1/2 z-50 bg-card border border-border/80 rounded-xl shadow-2xl p-4 w-[90%] max-w-md animate-in slide-in-from-top duration-300">
+          <div className="flex items-center justify-between gap-3 text-left">
+            <div className="flex items-center gap-2.5">
+              <div className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse" />
+              <div>
+                <span className="text-xs font-bold text-foreground block">
+                  {entryRequests[0].name} wants to join
+                </span>
+                <span className="text-[10px] text-muted-foreground block">
+                  Click admit to let them enter the meeting room.
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => handleDenyEntry(entryRequests[0].socketId, entryRequests[0].userId)}
+                className="text-xs font-bold cursor-pointer text-destructive hover:bg-destructive/10 h-8 px-3"
+              >
+                Deny
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => handleApproveEntry(entryRequests[0].socketId, entryRequests[0].userId)}
+                className="text-xs font-bold cursor-pointer h-8 px-3"
+              >
+                Admit
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

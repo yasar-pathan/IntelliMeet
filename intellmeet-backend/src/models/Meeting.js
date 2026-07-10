@@ -17,6 +17,10 @@ const participantSchema = new mongoose.Schema({
     type: String,
     enum: ['host', 'co-host', 'participant'],
     default: 'participant'
+  },
+  approved: {
+    type: Boolean,
+    default: true
   }
 }, { _id: false });
 

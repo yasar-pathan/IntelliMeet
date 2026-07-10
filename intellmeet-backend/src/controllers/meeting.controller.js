@@ -373,6 +373,38 @@ const joinMeeting = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'Meeting capacity limit reached');
   }
 
+  // Verify waiting room entry permission
+  const isHost = hostId === userId.toString();
+  const requiresApproval = meeting.settings?.waitingRoom && !isHost;
+
+  if (requiresApproval) {
+    const existingPart = meeting.participants.find(p => p.user.toString() === userId.toString());
+    if (!existingPart || !existingPart.approved) {
+      if (!existingPart) {
+        meeting.participants.push({
+          user: userId,
+          role: 'participant',
+          approved: false,
+          joinedAt: new Date()
+        });
+      } else {
+        existingPart.leftAt = undefined;
+        existingPart.approved = false;
+        existingPart.joinedAt = new Date();
+      }
+
+      await meeting.save();
+      await invalidateMeetingCaches(userId, meetingId);
+
+      const meetingResponse = meeting.toObject();
+      delete meetingResponse.password;
+
+      return res.status(200).json(
+        new ApiResponse(200, { approved: false, meeting: meetingResponse }, 'Waiting for host approval')
+      );
+    }
+  }
+
   // Update meeting state to 'live' if it was scheduled
   if (meeting.status === 'scheduled') {
     meeting.status = 'live';
@@ -388,7 +420,8 @@ const joinMeeting = asyncHandler(async (req, res) => {
     meeting.participants.push({
       user: userId,
       joinedAt: new Date(),
-      role: hostId === userId.toString() ? 'host' : 'participant'
+      role: hostId === userId.toString() ? 'host' : 'participant',
+      approved: true
     });
   }
 
@@ -410,7 +443,7 @@ const joinMeeting = asyncHandler(async (req, res) => {
   delete meetingResponse.password;
 
   res.status(200).json(
-    new ApiResponse(200, { meeting: meetingResponse, turnCredentials }, 'Successfully joined the meeting')
+    new ApiResponse(200, { approved: true, meeting: meetingResponse, turnCredentials }, 'Successfully joined the meeting')
   );
 });
 

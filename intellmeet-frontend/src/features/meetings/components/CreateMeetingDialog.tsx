@@ -21,6 +21,7 @@ export const CreateMeetingDialog: React.FC<CreateMeetingDialogProps> = ({ isOpen
   const [scheduledAt, setScheduledAt] = React.useState('');
   const [isPasswordProtected, setIsPasswordProtected] = React.useState(false);
   const [password, setPassword] = React.useState('');
+  const [waitingRoom, setWaitingRoom] = React.useState(false);
 
   const createMeetingMutation = useMutation({
     mutationFn: async () => {
@@ -28,6 +29,9 @@ export const CreateMeetingDialog: React.FC<CreateMeetingDialogProps> = ({ isOpen
         title,
         description,
         isPasswordProtected,
+        settings: {
+          waitingRoom,
+        },
       };
       if (scheduledAt) payload.scheduledAt = new Date(scheduledAt).toISOString();
       if (isPasswordProtected && password) payload.password = password;
@@ -45,6 +49,7 @@ export const CreateMeetingDialog: React.FC<CreateMeetingDialogProps> = ({ isOpen
       setScheduledAt('');
       setIsPasswordProtected(false);
       setPassword('');
+      setWaitingRoom(false);
     },
     onError: (err: any) => {
       toast.error(err.response?.data?.message || 'Failed to create meeting');
@@ -117,6 +122,22 @@ export const CreateMeetingDialog: React.FC<CreateMeetingDialogProps> = ({ isOpen
                 id="passwordProtect"
                 checked={isPasswordProtected}
                 onCheckedChange={setIsPasswordProtected}
+              />
+            </div>
+
+            <div className="flex items-center justify-between p-3 rounded-lg border border-border/40 bg-muted/20">
+              <div>
+                <Label htmlFor="waitingRoom" className="text-sm font-bold text-foreground">
+                  Ask permission to join
+                </Label>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Require guest permission approval before entry is allowed.
+                </p>
+              </div>
+              <Switch
+                id="waitingRoom"
+                checked={waitingRoom}
+                onCheckedChange={setWaitingRoom}
               />
             </div>
 

@@ -19,7 +19,7 @@ const registerMeetingHandlers = (io, socket) => {
       const userId = socket.user._id.toString();
       const isHost = meeting.host.toString() === userId;
       const isActiveParticipant = meeting.participants.some(
-        (participant) => participant.user.toString() === userId && !participant.leftAt
+        (participant) => participant.user.toString() === userId && !participant.leftAt && participant.approved !== false
       );
       if (!isHost && !isActiveParticipant) {
         socket.emit('meeting:error', { message: 'Join meeting via API before opening room socket' });
@@ -335,6 +335,120 @@ const registerMeetingHandlers = (io, socket) => {
       });
     } catch (err) {
       logger.error(`Error saving transcript chunk in Redis: ${err.message}`);
+    }
+  });
+
+  // 9. Entry Approval / Waiting Room Handlers
+  socket.on('meeting:request-entry', async ({ meetingCode }) => {
+    if (!meetingCode) return;
+    try {
+      const meeting = await Meeting.findOne({ meetingCode }).select('_id host participants title settings');
+      if (!meeting) {
+        socket.emit('meeting:entry-denied', { message: 'Meeting room not found' });
+        return;
+      }
+
+      const userId = socket.user._id.toString();
+      const isHost = meeting.host.toString() === userId;
+      if (isHost) {
+        socket.emit('meeting:entry-approved', { meeting });
+        return;
+      }
+
+      if (!meeting.settings?.waitingRoom) {
+        socket.emit('meeting:entry-approved', { meeting });
+        return;
+      }
+
+      const participant = meeting.participants.find(p => p.user.toString() === userId);
+      if (participant && participant.approved) {
+        socket.emit('meeting:entry-approved', { meeting });
+        return;
+      }
+
+      const hostRoom = `user:${meeting.host.toString()}`;
+      const User = require('../models/User');
+      const user = await User.findById(userId).select('name avatar');
+
+      io.to(hostRoom).emit('meeting:entry-request', {
+        socketId: socket.id,
+        userId: userId,
+        name: user ? user.name : 'Unknown User',
+        avatar: user ? user.avatar : ''
+      });
+
+      logger.info(`User ${userId} requested entry to meeting ${meetingCode}`);
+    } catch (err) {
+      logger.error(`Error in meeting:request-entry: ${err.message}`);
+    }
+  });
+
+  socket.on('meeting:approve-entry', async ({ targetSocketId, targetUserId }) => {
+    const activeMeetingId = socket.activeMeetingId;
+    if (!activeMeetingId || !targetUserId || !targetSocketId) return;
+
+    try {
+      const meeting = await Meeting.findById(activeMeetingId);
+      if (!meeting) return;
+
+      if (meeting.host.toString() !== socket.user._id.toString()) {
+        logger.warn(`Non-host ${socket.user._id} tried to approve entry.`);
+        return;
+      }
+
+      const partIdx = meeting.participants.findIndex(p => p.user.toString() === targetUserId.toString());
+      if (partIdx !== -1) {
+        meeting.participants[partIdx].approved = true;
+      } else {
+        meeting.participants.push({
+          user: targetUserId,
+          role: 'participant',
+          approved: true,
+          joinedAt: new Date()
+        });
+      }
+
+      await meeting.save();
+
+      const meetingService = require('../services/meeting.service');
+      const turnCredentials = meetingService.generateTurnCredentials(targetUserId);
+
+      io.to(targetSocketId).emit('meeting:entry-approved', {
+        meeting,
+        turnCredentials
+      });
+
+      logger.info(`Host approved entry for user ${targetUserId} in meeting ${meeting._id}`);
+    } catch (err) {
+      logger.error(`Error in meeting:approve-entry: ${err.message}`);
+    }
+  });
+
+  socket.on('meeting:deny-entry', async ({ targetSocketId, targetUserId }) => {
+    const activeMeetingId = socket.activeMeetingId;
+    if (!activeMeetingId || !targetSocketId) return;
+
+    try {
+      const meeting = await Meeting.findById(activeMeetingId);
+      if (!meeting) return;
+
+      if (meeting.host.toString() !== socket.user._id.toString()) {
+        logger.warn(`Non-host ${socket.user._id} tried to deny entry.`);
+        return;
+      }
+
+      if (targetUserId) {
+        meeting.participants = meeting.participants.filter(p => p.user.toString() !== targetUserId.toString());
+        await meeting.save();
+      }
+
+      io.to(targetSocketId).emit('meeting:entry-denied', {
+        message: 'The host denied your request to join the meeting.'
+      });
+
+      logger.info(`Host denied entry for user ${targetUserId} in meeting ${meeting._id}`);
+    } catch (err) {
+      logger.error(`Error in meeting:deny-entry: ${err.message}`);
     }
   });
 
