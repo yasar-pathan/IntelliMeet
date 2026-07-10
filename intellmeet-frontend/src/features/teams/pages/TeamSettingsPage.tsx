@@ -28,16 +28,16 @@ export const TeamSettingsPage: React.FC = () => {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false);
 
   // Fetch team details
-  const { data, isLoading } = useQuery<ApiResponse<Team>>({
+  const { data, isLoading } = useQuery<ApiResponse<{ team: Team; recentMeetings: any[] }>>({
     queryKey: ['teams', 'detail', teamId],
     queryFn: async () => {
-      const response = await api.get<ApiResponse<Team>>(`/teams/${teamId}`);
+      const response = await api.get<ApiResponse<{ team: Team; recentMeetings: any[] }>>(`/teams/${teamId}`);
       return response.data;
     },
     enabled: !!teamId,
   });
 
-  const team = data?.data;
+  const team = data?.data?.team;
   const isOwner = team && (typeof team.owner === 'string' ? team.owner === currentUser?._id : team.owner._id === currentUser?._id);
 
   React.useEffect(() => {
